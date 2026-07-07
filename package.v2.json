@@ -1,0 +1,14 @@
+{
+  "TelegraphVideo": {
+    "name": "Telegraph Video",
+    "description": "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。",
+    "labels": "媒体库,STRM,Telegraph Video",
+    "version": "0.1.0",
+    "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png",
+    "author": "telegraph-video",
+    "level": 1,
+    "history": {
+      "v0.1.0": "创建可安装的 MP V2 插件骨架"
+    }
+  }
+}

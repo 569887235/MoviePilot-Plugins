@@ -1,6 +1,25 @@
 # telegraph-video-mp-plugin
 
-MP plugin placeholder.
+MoviePilot V2 plugin repository for Telegraph Video.
+
+This repository follows the MoviePilot official plugin repository layout:
+
+- `package.v2.json` is the V2 plugin market index.
+- `plugins.v2/telegraphvideo/__init__.py` contains the `TelegraphVideo` plugin class.
+- The plugin directory name is the lowercase plugin class name.
+- Market metadata in `package.v2.json` must stay aligned with the `plugin_*` class fields.
+
+Current state:
+
+- The plugin is an installable empty skeleton.
+- `get_state()` returns `False` because no runtime integration is enabled yet.
+- No commands, services, APIs, forms, or pages are registered yet.
+
+Install in MoviePilot:
+
+1. Publish this repository to `https://github.com/569887235/MoviePilot-Plugins` on the `main` branch.
+2. Add `https://github.com/569887235/MoviePilot-Plugins` as a third-party plugin repository in MoviePilot.
+3. Refresh the plugin market and install `Telegraph Video`.
 
 Responsibilities:
 
