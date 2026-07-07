@@ -15,7 +15,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.2"
+    plugin_version = "0.1.3"
     plugin_author = "telegraph-video"
     plugin_config_prefix = "telegraphvideo_"
     plugin_order = 1
@@ -184,55 +184,150 @@ class TelegraphVideo(_PluginBase):
     def get_form(self) -> tuple[list, dict]:
         return [
             {
-                "component": "VSwitch",
-                "model": "enabled",
-                "label": "启用插件接口",
-            },
-            {
-                "component": "VTextField",
-                "model": "source_storage",
-                "label": "源存储类型",
-                "placeholder": "local / smb / alist / u115 ...",
-            },
-            {
-                "component": "VTextField",
-                "model": "target_storage",
-                "label": "目标存储类型",
-                "placeholder": "留空使用 MP 默认",
-            },
-            {
-                "component": "VTextField",
-                "model": "target_path",
-                "label": "目标目录",
-                "placeholder": "留空使用 MP 默认媒体库目录",
-            },
-            {
-                "component": "VSelect",
-                "model": "transfer_type",
-                "label": "整理方式",
-                "items": [
-                    {"title": "使用 MP 默认", "value": ""},
-                    {"title": "移动", "value": "move"},
-                    {"title": "复制", "value": "copy"},
-                    {"title": "硬链接", "value": "link"},
-                    {"title": "软链接", "value": "softlink"},
+                "component": "VForm",
+                "content": [
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "model": "enabled",
+                                        "props": {
+                                            "label": "启用插件接口",
+                                            "hint": "开启后允许 Telegraph Video 调用本插件整理接口。",
+                                            "persistent-hint": True,
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 8},
+                                "content": [
+                                    {
+                                        "component": "VAlert",
+                                        "props": {
+                                            "type": "info",
+                                            "variant": "tonal",
+                                            "text": "扫描任务在 Telegraph Video 系统中创建；这里仅配置 MP 收到条目后如何调用原生整理。",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "model": "source_storage",
+                                        "props": {
+                                            "label": "源存储类型",
+                                            "placeholder": "local / smb / alist / u115 ...",
+                                            "hint": "必须与 MoviePilot 中可访问该路径的存储类型一致；扫描目录不在这里配置。",
+                                            "persistent-hint": True,
+                                            "clearable": True,
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSelect",
+                                        "model": "transfer_type",
+                                        "props": {
+                                            "label": "整理方式",
+                                            "items": [
+                                                {"title": "使用 MP 默认", "value": ""},
+                                                {"title": "移动", "value": "move"},
+                                                {"title": "复制", "value": "copy"},
+                                                {"title": "硬链接", "value": "link"},
+                                                {"title": "软链接", "value": "softlink"},
+                                            ],
+                                            "hint": "留空时使用 MoviePilot 当前默认整理方式。",
+                                            "persistent-hint": True,
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "model": "target_storage",
+                                        "props": {
+                                            "label": "目标存储类型",
+                                            "placeholder": "留空使用 MP 默认",
+                                            "hint": "可选。指定后传给 MP 原生整理作为目标存储。",
+                                            "persistent-hint": True,
+                                            "clearable": True,
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "model": "target_path",
+                                        "props": {
+                                            "label": "目标目录",
+                                            "placeholder": "留空使用 MP 默认媒体库目录",
+                                            "hint": "可选。不是扫描目录，是整理后的目标目录。",
+                                            "persistent-hint": True,
+                                            "clearable": True,
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "model": "scrape",
+                                        "props": {"label": "刮削元数据"},
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "model": "force",
+                                        "props": {"label": "强制整理"},
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "model": "background",
+                                        "props": {"label": "后台整理"},
+                                    }
+                                ],
+                            },
+                        ],
+                    }
                 ],
-            },
-            {
-                "component": "VSwitch",
-                "model": "scrape",
-                "label": "刮削元数据",
-            },
-            {
-                "component": "VSwitch",
-                "model": "force",
-                "label": "强制整理",
-            },
-            {
-                "component": "VSwitch",
-                "model": "background",
-                "label": "后台整理",
-            },
+            }
         ], {
             "enabled": False,
             "source_storage": "local",
