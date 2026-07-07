@@ -18,7 +18,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.4"
+    plugin_version = "0.1.5"
     plugin_author = "telegraph-video"
     plugin_config_prefix = "telegraphvideo_"
     plugin_order = 1
@@ -28,18 +28,24 @@ class TelegraphVideo(_PluginBase):
         self._config = config or {}
         logger.info(
             "[TelegraphVideo] 插件初始化，"
-            f"enabled={bool(self._config.get('enabled'))}, "
-            f"source_storage={self._config.get('source_storage') or 'local'}, "
-            f"target_storage={self._config.get('target_storage') or None}, "
-            f"target_path={self._config.get('target_path') or None}, "
-            f"transfer_type={self._config.get('transfer_type') or None}, "
-            f"scrape={self._config.get('scrape')}, "
-            f"business_api_base_url={self._config.get('business_api_base_url') or None}, "
-            f"callback_enabled={bool(self._config.get('callback_enabled'))}"
+            f"enabled={self._enabled()}, "
+            f"source_storage={self._config_value('source_storage') or 'local'}, "
+            f"target_storage={self._config_value('target_storage') or None}, "
+            f"target_path={self._config_value('target_path') or None}, "
+            f"transfer_type={self._config_value('transfer_type') or None}, "
+            f"scrape={self._config_value('scrape')}, "
+            f"business_api_base_url={self._config_value('business_api_base_url') or None}, "
+            f"callback_enabled={bool(self._config_value('callback_enabled'))}"
         )
 
+    def _config_value(self, key: str, default: Any = None) -> Any:
+        return self._config.get(key, self._config.get(f"{self.plugin_config_prefix}{key}", default))
+
+    def _enabled(self) -> bool:
+        return bool(self._config_value("_enabled", self._config_value("enabled", False)))
+
     def get_state(self) -> bool:
-        return bool(self._config.get("enabled"))
+        return self._enabled()
 
     @staticmethod
     def get_command() -> list:
@@ -72,7 +78,7 @@ class TelegraphVideo(_PluginBase):
         return (
             payload.get("source_storage")
             or payload.get("storage")
-            or self._config.get("source_storage")
+            or self._config_value('source_storage')
             or "local"
         )
 
@@ -95,13 +101,13 @@ class TelegraphVideo(_PluginBase):
         return str(value).strip().lower() in {"1", "true", "yes", "on", "y"}
 
     def _transfer_options(self) -> Dict[str, Any]:
-        target_path = self._config.get("target_path") or None
+        target_path = self._config_value('target_path') or None
         return {
-            "target_storage": self._config.get("target_storage") or None,
+            "target_storage": self._config_value('target_storage') or None,
             "target_path": Path(target_path) if target_path else None,
-            "transfer_type": self._config.get("transfer_type") or None,
-            "scrape": self._as_bool(self._config.get("scrape")),
-            "force": self._as_bool(self._config.get("force")) or False,
+            "transfer_type": self._config_value('transfer_type') or None,
+            "scrape": self._as_bool(self._config_value('scrape')),
+            "force": self._as_bool(self._config_value("force")) or False,
             "background": False,
         }
 
@@ -185,11 +191,11 @@ class TelegraphVideo(_PluginBase):
             return None
 
     def _business_callback_config(self) -> Dict[str, Any]:
-        base_url = str(self._config.get("business_api_base_url") or "").rstrip("/")
-        endpoint = self._config.get("business_callback_endpoint") or "/api/mp/organize-callback"
-        token = self._config.get("business_callback_token") or ""
+        base_url = str(self._config_value('business_api_base_url') or "").rstrip("/")
+        endpoint = self._config_value("business_callback_endpoint") or "/api/mp/organize-callback"
+        token = self._config_value("business_callback_token") or ""
         return {
-            "enabled": bool(self._config.get("callback_enabled")),
+            "enabled": bool(self._config_value('callback_enabled')),
             "url": base_url + (endpoint if str(endpoint).startswith("/") else "/" + str(endpoint)) if base_url else "",
             "token": token,
         }
@@ -230,7 +236,7 @@ class TelegraphVideo(_PluginBase):
         summary = self._payload_summary(payload)
         logger.info(f"[TelegraphVideo] 收到整理请求: {summary}")
         try:
-            if not self._config.get("enabled"):
+            if not self._enabled():
                 logger.warning(f"[TelegraphVideo] 整理请求被拒绝，插件未启用: {summary}")
                 return {
                     "success": False,
@@ -322,7 +328,7 @@ class TelegraphVideo(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VSwitch",
-                                        "model": "enabled",
+                                        "model": "_enabled",
                                         "props": {
                                             "label": "启用插件接口",
                                             "hint": "开启后允许 Telegraph Video 调用本插件整理接口。",
@@ -494,17 +500,17 @@ class TelegraphVideo(_PluginBase):
                 ],
             }
         ], {
-            "enabled": False,
-            "source_storage": "local",
-            "target_storage": "",
-            "target_path": "",
-            "transfer_type": "",
-            "scrape": None,
-            "force": False,
-            "callback_enabled": False,
-            "business_api_base_url": "",
-            "business_callback_endpoint": "/api/mp/organize-callback",
-            "business_callback_token": "",
+            "_enabled": self._enabled(),
+            "source_storage": self._config_value("source_storage", "local"),
+            "target_storage": self._config_value("target_storage", ""),
+            "target_path": self._config_value("target_path", ""),
+            "transfer_type": self._config_value("transfer_type", ""),
+            "scrape": self._config_value("scrape", None),
+            "force": self._config_value("force", False),
+            "callback_enabled": self._config_value("callback_enabled", False),
+            "business_api_base_url": self._config_value("business_api_base_url", ""),
+            "business_callback_endpoint": self._config_value("business_callback_endpoint", "/api/mp/organize-callback"),
+            "business_callback_token": self._config_value("business_callback_token", ""),
         }
 
     def get_page(self) -> list:
