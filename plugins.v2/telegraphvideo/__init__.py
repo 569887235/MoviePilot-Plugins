@@ -19,7 +19,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.6"
+    plugin_version = "0.1.7"
     plugin_author = "telegraph-video"
     plugin_config_prefix = "telegraphvideo_"
     plugin_order = 1
@@ -410,8 +410,8 @@ class TelegraphVideo(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VSwitch",
-                                        "model": "_enabled",
                                         "props": {
+                                            "model": "enabled",
                                             "label": "启用插件接口",
                                             "hint": "开启后允许 Telegraph Video 调用本插件整理接口。",
                                             "persistent-hint": True,
@@ -439,8 +439,8 @@ class TelegraphVideo(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VTextField",
-                                        "model": "source_storage",
                                         "props": {
+                                            "model": "source_storage",
                                             "label": "源存储类型",
                                             "placeholder": "local / smb / alist / u115 ...",
                                             "hint": "必须与 MoviePilot 中可访问该路径的存储类型一致；扫描目录不在这里配置。",
@@ -456,8 +456,8 @@ class TelegraphVideo(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VSelect",
-                                        "model": "transfer_type",
                                         "props": {
+                                            "model": "transfer_type",
                                             "label": "整理方式",
                                             "items": [
                                                 {"title": "使用 MP 默认", "value": ""},
@@ -478,8 +478,8 @@ class TelegraphVideo(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VTextField",
-                                        "model": "target_storage",
                                         "props": {
+                                            "model": "target_storage",
                                             "label": "目标存储类型",
                                             "placeholder": "留空使用 MP 默认",
                                             "hint": "可选。指定后传给 MP 原生整理作为目标存储。",
@@ -495,8 +495,8 @@ class TelegraphVideo(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VTextField",
-                                        "model": "target_path",
                                         "props": {
+                                            "model": "target_path",
                                             "label": "目标目录",
                                             "placeholder": "留空使用 MP 默认媒体库目录",
                                             "hint": "可选。不是扫描目录，是整理后的目标目录。",
@@ -512,8 +512,8 @@ class TelegraphVideo(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VSwitch",
-                                        "model": "callback_enabled",
                                         "props": {
+                                            "model": "callback_enabled",
                                             "label": "回传整理结果",
                                             "hint": "开启后整理完成会主动回调 Telegraph Video 业务系统。",
                                             "persistent-hint": True,
@@ -527,8 +527,8 @@ class TelegraphVideo(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VTextField",
-                                        "model": "business_api_base_url",
                                         "props": {
+                                            "model": "business_api_base_url",
                                             "label": "业务系统地址",
                                             "placeholder": "https://video.example.com",
                                             "hint": "Telegraph Video API 的外部访问地址。",
@@ -544,8 +544,8 @@ class TelegraphVideo(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VTextField",
-                                        "model": "business_callback_token",
                                         "props": {
+                                            "model": "business_callback_token",
                                             "label": "业务回调 Token",
                                             "type": "password",
                                             "hint": "对应业务系统 MP_CALLBACK_TOKEN。",
@@ -561,8 +561,7 @@ class TelegraphVideo(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VSwitch",
-                                        "model": "scrape",
-                                        "props": {"label": "刮削元数据"},
+                                        "props": {"model": "scrape", "label": "刮削元数据"},
                                     }
                                 ],
                             },
@@ -572,8 +571,7 @@ class TelegraphVideo(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VSwitch",
-                                        "model": "force",
-                                        "props": {"label": "强制整理"},
+                                        "props": {"model": "force", "label": "强制整理"},
                                     }
                                 ],
                             },
@@ -582,7 +580,7 @@ class TelegraphVideo(_PluginBase):
                 ],
             }
         ], {
-            "_enabled": self._enabled(),
+            "enabled": self._enabled(),
             "source_storage": self._config_value("source_storage", "local"),
             "target_storage": self._config_value("target_storage", ""),
             "target_path": self._config_value("target_path", ""),
