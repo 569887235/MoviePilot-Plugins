@@ -1,5 +1,6 @@
 import logging
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 try:
     from app.log import logger
@@ -14,7 +15,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.1"
+    plugin_version = "0.1.2"
     plugin_author = "telegraph-video"
     plugin_config_prefix = "telegraphvideo_"
     plugin_order = 1
@@ -22,7 +23,15 @@ class TelegraphVideo(_PluginBase):
 
     def init_plugin(self, config: dict = None):
         self._config = config or {}
-        logger.info(f"[TelegraphVideo] 插件初始化，enabled={bool(self._config.get('enabled'))}")
+        logger.info(
+            "[TelegraphVideo] 插件初始化，"
+            f"enabled={bool(self._config.get('enabled'))}, "
+            f"source_storage={self._config.get('source_storage') or 'local'}, "
+            f"target_storage={self._config.get('target_storage') or None}, "
+            f"target_path={self._config.get('target_path') or None}, "
+            f"transfer_type={self._config.get('transfer_type') or None}, "
+            f"scrape={self._config.get('scrape')}"
+        )
 
     def get_state(self) -> bool:
         return bool(self._config.get("enabled"))
@@ -54,8 +63,46 @@ class TelegraphVideo(_PluginBase):
             "file_size": payload.get("file_size"),
         }
 
+    def _source_storage(self, payload: Dict[str, Any]) -> str:
+        return (
+            payload.get("source_storage")
+            or payload.get("storage")
+            or self._config.get("source_storage")
+            or "local"
+        )
+
+    @staticmethod
+    def _file_type(path: str, storage: str, payload: Dict[str, Any]) -> str:
+        if payload.get("file_type") in {"file", "dir"}:
+            return payload["file_type"]
+        if payload.get("type") in {"file", "dir"}:
+            return payload["type"]
+        if storage == "local" and Path(path).is_dir():
+            return "dir"
+        return "dir" if str(path).endswith("/") else "file"
+
+    @staticmethod
+    def _as_bool(value: Any) -> Optional[bool]:
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on", "y"}
+
+    def _transfer_options(self) -> Dict[str, Any]:
+        target_path = self._config.get("target_path") or None
+        return {
+            "target_storage": self._config.get("target_storage") or None,
+            "target_path": Path(target_path) if target_path else None,
+            "transfer_type": self._config.get("transfer_type") or None,
+            "scrape": self._as_bool(self._config.get("scrape")),
+            "force": self._as_bool(self._config.get("force")) or False,
+            "background": self._as_bool(self._config.get("background")) or False,
+        }
+
     def organize(self, payload: Dict[str, Any]) -> dict:
-        summary = self._payload_summary(payload or {})
+        payload = payload or {}
+        summary = self._payload_summary(payload)
         logger.info(f"[TelegraphVideo] 收到整理请求: {summary}")
         try:
             if not self._config.get("enabled"):
@@ -65,14 +112,61 @@ class TelegraphVideo(_PluginBase):
                     "message": "Telegraph Video 插件未启用，无法执行整理。",
                 }
 
-            # TODO: Wire this to MoviePilot's native transfer/scrape/organize service once
-            # the target MP runtime API is confirmed. Returning success here without MP's
-            # result would make the business database believe the file has been organized.
-            logger.warning(f"[TelegraphVideo] 整理请求未执行，MP 原生整理接口尚未接入: {summary}")
+            source_path = payload.get("source_path")
+            if not source_path:
+                logger.warning(f"[TelegraphVideo] 整理请求缺少 source_path: {summary}")
+                return {
+                    "success": False,
+                    "message": "整理请求缺少 source_path。",
+                    "scan_item_id": payload.get("scan_item_id"),
+                }
+
+            source_storage = self._source_storage(payload)
+            if source_storage != "local" and not str(source_path).startswith("/"):
+                source_path = "/" + str(source_path)
+
+            from app.chain.transfer import TransferChain
+            from app.schemas import FileItem
+
+            fileitem = FileItem(
+                storage=source_storage,
+                path=source_path,
+                type=self._file_type(source_path, source_storage, payload),
+                name=payload.get("source_name"),
+                size=payload.get("file_size"),
+            )
+            options = self._transfer_options()
+            fileitem_log = fileitem.model_dump() if hasattr(fileitem, "model_dump") else fileitem.dict()
+            logger.info(
+                f"[TelegraphVideo] 调用 MP 原生整理: fileitem={fileitem_log}, "
+                f"options={options}, summary={summary}"
+            )
+            state, result = TransferChain().manual_transfer(
+                fileitem=fileitem,
+                target_storage=options["target_storage"],
+                target_path=options["target_path"],
+                transfer_type=options["transfer_type"],
+                scrape=options["scrape"],
+                force=options["force"],
+                background=options["background"],
+            )
+            logger.info(
+                f"[TelegraphVideo] MP 原生整理返回: success={state}, result={result}, summary={summary}"
+            )
+            if not state:
+                return {
+                    "success": False,
+                    "message": result,
+                    "scan_item_id": payload.get("scan_item_id"),
+                    "source_path": source_path,
+                    "source_name": payload.get("source_name"),
+                }
+
             return {
-                "success": False,
-                "message": "MP 原生整理接口尚未接入 Telegraph Video 插件。",
-                "source_path": payload.get("source_path"),
+                "success": True,
+                "message": "整理完成",
+                "organize_result": result,
+                "source_path": source_path,
                 "source_name": payload.get("source_name"),
                 "scan_item_id": payload.get("scan_item_id"),
             }
@@ -93,8 +187,62 @@ class TelegraphVideo(_PluginBase):
                 "component": "VSwitch",
                 "model": "enabled",
                 "label": "启用插件接口",
-            }
-        ], {"enabled": False}
+            },
+            {
+                "component": "VTextField",
+                "model": "source_storage",
+                "label": "源存储类型",
+                "placeholder": "local / smb / alist / u115 ...",
+            },
+            {
+                "component": "VTextField",
+                "model": "target_storage",
+                "label": "目标存储类型",
+                "placeholder": "留空使用 MP 默认",
+            },
+            {
+                "component": "VTextField",
+                "model": "target_path",
+                "label": "目标目录",
+                "placeholder": "留空使用 MP 默认媒体库目录",
+            },
+            {
+                "component": "VSelect",
+                "model": "transfer_type",
+                "label": "整理方式",
+                "items": [
+                    {"title": "使用 MP 默认", "value": ""},
+                    {"title": "移动", "value": "move"},
+                    {"title": "复制", "value": "copy"},
+                    {"title": "硬链接", "value": "link"},
+                    {"title": "软链接", "value": "softlink"},
+                ],
+            },
+            {
+                "component": "VSwitch",
+                "model": "scrape",
+                "label": "刮削元数据",
+            },
+            {
+                "component": "VSwitch",
+                "model": "force",
+                "label": "强制整理",
+            },
+            {
+                "component": "VSwitch",
+                "model": "background",
+                "label": "后台整理",
+            },
+        ], {
+            "enabled": False,
+            "source_storage": "local",
+            "target_storage": "",
+            "target_path": "",
+            "transfer_type": "",
+            "scrape": None,
+            "force": False,
+            "background": False,
+        }
 
     def get_page(self) -> list:
         return []

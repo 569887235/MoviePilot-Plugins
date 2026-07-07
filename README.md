@@ -11,9 +11,9 @@ This repository follows the MoviePilot official plugin repository layout:
 
 Current state:
 
-- The plugin is an installable empty skeleton.
-- `get_state()` returns `False` because no runtime integration is enabled yet.
-- No commands, services, APIs, forms, or pages are registered yet.
+- The plugin exposes `POST /api/v1/plugin/TelegraphVideo/organize`.
+- The organize endpoint calls MoviePilot `TransferChain().manual_transfer(...)`.
+- Enable the plugin interface in MoviePilot plugin settings before calling it.
 
 Install in MoviePilot:
 
