@@ -19,9 +19,8 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.7"
+    plugin_version = "0.1.8"
     plugin_author = "telegraph-video"
-    plugin_config_prefix = "telegraphvideo_"
     plugin_order = 1
     auth_level = 1
 
@@ -40,10 +39,10 @@ class TelegraphVideo(_PluginBase):
         )
 
     def _config_value(self, key: str, default: Any = None) -> Any:
-        return self._config.get(key, self._config.get(f"{self.plugin_config_prefix}{key}", default))
+        return self._config.get(key, default)
 
     def _enabled(self) -> bool:
-        return bool(self._config_value("_enabled", self._config_value("enabled", False)))
+        return bool(self._config_value("enabled", False))
 
     def get_state(self) -> bool:
         return self._enabled()
