@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -18,7 +19,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.5"
+    plugin_version = "0.1.6"
     plugin_author = "telegraph-video"
     plugin_config_prefix = "telegraphvideo_"
     plugin_order = 1
@@ -72,6 +73,7 @@ class TelegraphVideo(_PluginBase):
             "file_kind": payload.get("file_kind"),
             "file_ext": payload.get("file_ext"),
             "file_size": payload.get("file_size"),
+            "organize_mode": payload.get("organize_mode"),
         }
 
     def _source_storage(self, payload: Dict[str, Any]) -> str:
@@ -110,6 +112,68 @@ class TelegraphVideo(_PluginBase):
             "force": self._as_bool(self._config_value("force")) or False,
             "background": False,
         }
+
+    @staticmethod
+    def _normalize_mode(value: Any) -> str:
+        text = str(value or "transfer").strip().lower()
+        if text in {"recognize", "metadata", "info", "dry_run", "dryrun", "only_info"}:
+            return "recognize"
+        return "transfer"
+
+    @staticmethod
+    def _strm_safe_name(name: str) -> str:
+        cleaned = "".join(ch if ch not in '\\/?:*"<>|' else "_" for ch in str(name or "source.strm"))
+        return cleaned if cleaned.lower().endswith(".strm") else f"{cleaned}.strm"
+
+    def _build_work_strm(self, payload: Dict[str, Any]) -> Path:
+        strm_content = payload.get("strm_content") or payload.get("strmContent")
+        strm_url = payload.get("strm_play_url") or payload.get("strmPlayUrl") or payload.get("source_url")
+        if not strm_content and strm_url:
+            strm_content = str(strm_url).strip() + "\n"
+        if not strm_content:
+            source_path = payload.get("source_path")
+            if source_path and str(source_path).lower().endswith(".strm"):
+                return Path(source_path)
+            raise ValueError("缺少 strm_content 或 strm_play_url，无法整理 STRM")
+        data_dir = self.get_data_path() / "business_strm"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha1(str(payload.get("source_path") or payload.get("source_name") or strm_content).encode("utf-8")).hexdigest()[:12]
+        file_name = self._strm_safe_name(payload.get("source_name") or f"telegraph-video-{digest}.strm")
+        strm_path = data_dir / f"{digest}-{file_name}"
+        strm_path.write_text(str(strm_content).strip() + "\n", encoding="utf-8")
+        logger.info(f"[TelegraphVideo] 已生成临时 STRM: {strm_path}")
+        return strm_path
+
+    @staticmethod
+    def _context_to_payload(context: Any) -> Dict[str, Any]:
+        if not context:
+            return {}
+        context_dict = context.to_dict() if hasattr(context, "to_dict") else {}
+        media_info = context_dict.get("media_info") or {}
+        meta_info = context_dict.get("meta_info") or {}
+        media_type = media_info.get("type")
+        if hasattr(media_type, "value"):
+            media_type = media_type.value
+        metadata = {
+            "title": media_info.get("title") or meta_info.get("title") or meta_info.get("name"),
+            "original_title": media_info.get("original_title") or media_info.get("en_title"),
+            "year": media_info.get("year") or meta_info.get("year"),
+            "media_type": TelegraphVideo._media_type(media_type or meta_info.get("type")),
+            "tmdb_id": media_info.get("tmdb_id") or meta_info.get("tmdbid"),
+            "imdb_id": media_info.get("imdb_id"),
+            "douban_id": media_info.get("douban_id") or meta_info.get("doubanid"),
+            "season_number": media_info.get("season") or meta_info.get("begin_season"),
+            "episode_number": meta_info.get("begin_episode"),
+            "poster": media_info.get("poster_path"),
+            "overview": media_info.get("overview"),
+        }
+        metadata = {k: v for k, v in metadata.items() if v not in (None, "")}
+        return {"metadata": metadata, "media": metadata, "recognize_result": context_dict}
+
+    def _recognize_strm(self, strm_path: Path) -> Dict[str, Any]:
+        from app.chain.media import MediaChain
+        context = MediaChain().recognize_by_path(str(strm_path), obtain_images=True)
+        return self._context_to_payload(context)
 
     @staticmethod
     def _dump_model(value: Any) -> Any:
@@ -252,19 +316,35 @@ class TelegraphVideo(_PluginBase):
                     "scan_item_id": payload.get("scan_item_id"),
                 }
 
-            source_storage = self._source_storage(payload)
-            if source_storage != "local" and not str(source_path).startswith("/"):
-                source_path = "/" + str(source_path)
+            organize_mode = self._normalize_mode(payload.get("organize_mode"))
+            work_strm_path = self._build_work_strm(payload)
+            source_storage = "local"
+
+            if organize_mode == "recognize":
+                recognize_payload = self._recognize_strm(work_strm_path)
+                response_payload = {
+                    "success": True,
+                    "message": "识别完成",
+                    "organize_mode": organize_mode,
+                    "source_path": source_path,
+                    "source_name": payload.get("source_name"),
+                    "strm_path": str(work_strm_path),
+                    "scan_task_id": payload.get("scan_task_id"),
+                    "scan_item_id": payload.get("scan_item_id"),
+                    **recognize_payload,
+                }
+                self._post_business_callback(response_payload)
+                return response_payload
 
             from app.chain.transfer import TransferChain
             from app.schemas import FileItem
 
             fileitem = FileItem(
                 storage=source_storage,
-                path=source_path,
-                type=self._file_type(source_path, source_storage, payload),
-                name=payload.get("source_name"),
-                size=payload.get("file_size"),
+                path=str(work_strm_path),
+                type="file",
+                name=work_strm_path.name,
+                size=work_strm_path.stat().st_size if work_strm_path.exists() else None,
             )
             options = self._transfer_options()
             fileitem_log = fileitem.model_dump() if hasattr(fileitem, "model_dump") else fileitem.dict()
@@ -284,7 +364,7 @@ class TelegraphVideo(_PluginBase):
             logger.info(
                 f"[TelegraphVideo] MP 原生整理返回: success={state}, result={result}, summary={summary}"
             )
-            history = self._latest_transfer_history(source_path, source_storage)
+            history = self._latest_transfer_history(str(work_strm_path), source_storage)
             history_payload = self._history_to_payload(history)
             response_payload = {
                 "success": bool(state),
@@ -293,6 +373,8 @@ class TelegraphVideo(_PluginBase):
                 "transfer_result": result,
                 "source_path": source_path,
                 "source_name": payload.get("source_name"),
+                "organize_mode": organize_mode,
+                "strm_path": str(work_strm_path),
                 "scan_task_id": payload.get("scan_task_id"),
                 "scan_item_id": payload.get("scan_item_id"),
                 **history_payload,
