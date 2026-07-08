@@ -19,7 +19,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.8"
+    plugin_version = "0.1.9"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -144,10 +144,32 @@ class TelegraphVideo(_PluginBase):
         return strm_path
 
     @staticmethod
+    def _jsonable(value: Any, depth: int = 0) -> Any:
+        if depth > 6:
+            return str(value)
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, Path):
+            return value.as_posix()
+        if hasattr(value, "value") and not isinstance(value, dict):
+            return TelegraphVideo._jsonable(value.value, depth + 1)
+        if hasattr(value, "model_dump"):
+            return TelegraphVideo._jsonable(value.model_dump(), depth + 1)
+        if hasattr(value, "dict"):
+            return TelegraphVideo._jsonable(value.dict(), depth + 1)
+        if isinstance(value, dict):
+            return {str(k): TelegraphVideo._jsonable(v, depth + 1) for k, v in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [TelegraphVideo._jsonable(v, depth + 1) for v in value]
+        if hasattr(value, "__dict__"):
+            return {str(k): TelegraphVideo._jsonable(v, depth + 1) for k, v in vars(value).items() if not str(k).startswith("_")}
+        return str(value)
+
+    @staticmethod
     def _context_to_payload(context: Any) -> Dict[str, Any]:
         if not context:
             return {}
-        context_dict = context.to_dict() if hasattr(context, "to_dict") else {}
+        context_dict = TelegraphVideo._jsonable(context.to_dict() if hasattr(context, "to_dict") else context)
         media_info = context_dict.get("media_info") or {}
         meta_info = context_dict.get("meta_info") or {}
         media_type = media_info.get("type")
@@ -240,8 +262,9 @@ class TelegraphVideo(_PluginBase):
                 "status": getattr(history, "status", None),
                 "errmsg": getattr(history, "errmsg", None),
                 "files": getattr(history, "files", None),
-                "src_fileitem": getattr(history, "src_fileitem", None),
-                "dest_fileitem": getattr(history, "dest_fileitem", None),
+                "src_fileitem": self._jsonable(getattr(history, "src_fileitem", None)),
+                "dest_fileitem": self._jsonable(getattr(history, "dest_fileitem", None)),
+                "raw": self._jsonable(history),
             }
         }
 
