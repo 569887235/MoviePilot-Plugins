@@ -19,7 +19,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.9"
+    plugin_version = "0.1.10"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -287,6 +287,9 @@ class TelegraphVideo(_PluginBase):
         }
 
     def _post_business_callback(self, callback_payload: Dict[str, Any]) -> None:
+        if not callback_payload.get("scan_item_id"):
+            logger.info("[TelegraphVideo] 非扫描整理请求无 scan_item_id，跳过业务回调")
+            return
         callback = self._business_callback_config()
         if not callback["enabled"]:
             logger.info(f"[TelegraphVideo] 业务回调未启用，跳过: scan_item_id={callback_payload.get('scan_item_id')}")
