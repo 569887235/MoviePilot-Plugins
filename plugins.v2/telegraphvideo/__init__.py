@@ -19,7 +19,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.11"
+    plugin_version = "0.1.12"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -276,13 +276,34 @@ class TelegraphVideo(_PluginBase):
             }
         }
 
+    def _get_transfer_history_by_src(self, oper: Any, source_path: str, source_storage: str) -> Any:
+        try:
+            return oper.get_by_src(source_path, source_storage)
+        except TypeError:
+            return oper.get_by_src(source_path)
+
     def _latest_transfer_history(self, source_path: str, source_storage: str) -> Any:
         try:
             from app.db.transferhistory_oper import TransferHistoryOper
-            return TransferHistoryOper().get_by_src(source_path, source_storage)
+            return self._get_transfer_history_by_src(TransferHistoryOper(), source_path, source_storage)
         except Exception as err:
             logger.warning(f"[TelegraphVideo] 查询整理历史失败: source_path={source_path}, source_storage={source_storage}, error={err}")
             return None
+
+    def _delete_transfer_history(self, source_path: str, source_storage: str) -> bool:
+        try:
+            from app.db.transferhistory_oper import TransferHistoryOper
+            oper = TransferHistoryOper()
+            history = self._get_transfer_history_by_src(oper, source_path, source_storage)
+            history_id = getattr(history, "id", None) if history else None
+            if not history_id:
+                return False
+            oper.delete(history_id)
+            logger.info(f"[TelegraphVideo] 已删除旧整理历史: source_path={source_path}, source_storage={source_storage}, history_id={history_id}")
+            return True
+        except Exception as err:
+            logger.warning(f"[TelegraphVideo] 删除旧整理历史失败: source_path={source_path}, source_storage={source_storage}, error={err}")
+            return False
 
     def _business_callback_config(self) -> Dict[str, Any]:
         base_url = str(self._config_value('business_api_base_url') or "").rstrip("/")
@@ -380,6 +401,8 @@ class TelegraphVideo(_PluginBase):
                 size=work_strm_path.stat().st_size if work_strm_path.exists() else None,
             )
             options = self._transfer_options(payload)
+            if options["force"]:
+                self._delete_transfer_history(str(work_strm_path), source_storage)
             fileitem_log = fileitem.model_dump() if hasattr(fileitem, "model_dump") else fileitem.dict()
             logger.info(
                 f"[TelegraphVideo] 调用 MP 原生整理: fileitem={fileitem_log}, "

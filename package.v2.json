@@ -3,7 +3,7 @@
     "name": "Telegraph Video",
     "description": "Telegraph Video MP 接入插件，用于接收扫描条目并调用 MoviePilot 原生整理能力。",
     "labels": "媒体库,STRM,Telegraph Video",
-    "version": "0.1.11",
+    "version": "0.1.12",
     "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png",
     "author": "telegraph-video",
     "level": 1,
@@ -19,7 +19,8 @@
       "v0.1.8": "清理历史配置兼容逻辑，仅使用 MoviePilot V2 表单保存的标准配置键",
       "v0.1.9": "识别模式返回完整可序列化MP上下文，支持业务播放地址STRM二次入库流程",
       "v0.1.10": "非扫描媒体入库请求不再发送扫描条目业务回调",
-      "v0.1.11": "支持业务补入库请求透传 force 强制重新整理"
+      "v0.1.11": "支持业务补入库请求透传 force 强制重新整理",
+      "v0.1.12": "强制补入库前清理 MoviePilot 旧整理历史"
     }
   }
 }
