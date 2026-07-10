@@ -27,7 +27,7 @@ Responsibilities:
 - Push MP media to `POST /api/business/media/mp-push`.
 - Rewrite MP `.strm` files to the returned business play URL.
 - Execute business-originated MP import tasks by writing `.strm` files containing `/play/{mediaId}`.
-- Pass request-level `force=true` through to MoviePilot transfer and clear the matching old transfer history so explicit re-import can restore MP-side items deleted outside Telegraph Video.
+- Default business `transfer` requests to forced MoviePilot transfer, pass request-level `force=true`, and clear the matching old transfer history so explicit re-import can restore MP-side items deleted outside Telegraph Video.
 - Backfill scraped metadata through `POST /api/business/media/mp-backfill`.
 
 Required behavior:

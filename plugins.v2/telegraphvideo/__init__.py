@@ -19,7 +19,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.12"
+    plugin_version = "0.1.13"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -73,7 +73,7 @@ class TelegraphVideo(_PluginBase):
             "file_ext": payload.get("file_ext"),
             "file_size": payload.get("file_size"),
             "organize_mode": payload.get("organize_mode"),
-            "force": payload.get("force") or payload.get("force_transfer") or payload.get("forceTransfer"),
+            "force": payload.get('force') or payload.get('force_transfer') or payload.get('forceTransfer'),
         }
 
     def _source_storage(self, payload: Dict[str, Any]) -> str:
@@ -105,18 +105,20 @@ class TelegraphVideo(_PluginBase):
     def _transfer_options(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         payload = payload or {}
         target_path = self._config_value('target_path') or None
-        payload_force = self._as_bool(payload.get("force"))
+        payload_force = self._as_bool(payload.get('force'))
         if payload_force is None:
-            payload_force = self._as_bool(payload.get("force_transfer"))
+            payload_force = self._as_bool(payload.get('force_transfer'))
         if payload_force is None:
-            payload_force = self._as_bool(payload.get("forceTransfer"))
+            payload_force = self._as_bool(payload.get('forceTransfer'))
         config_force = self._as_bool(self._config_value("force")) or False
+        transfer_default_force = self._normalize_mode(payload.get("organize_mode")) == "transfer"
+        resolved_force = payload_force if payload_force is not None else (True if transfer_default_force else config_force)
         return {
             "target_storage": self._config_value('target_storage') or None,
             "target_path": Path(target_path) if target_path else None,
             "transfer_type": self._config_value('transfer_type') or None,
             "scrape": self._as_bool(self._config_value('scrape')),
-            "force": payload_force if payload_force is not None else config_force,
+            "force": resolved_force,
             "background": False,
         }
 
@@ -406,7 +408,9 @@ class TelegraphVideo(_PluginBase):
             fileitem_log = fileitem.model_dump() if hasattr(fileitem, "model_dump") else fileitem.dict()
             logger.info(
                 f"[TelegraphVideo] 调用 MP 原生整理: fileitem={fileitem_log}, "
-                f"options={options}, summary={summary}"
+                f"options={options}, payload_force={payload.get('force')}, "
+                f"force_transfer={payload.get('force_transfer') or payload.get('forceTransfer')}, "
+                f"summary={summary}"
             )
             state, result = TransferChain().manual_transfer(
                 fileitem=fileitem,
