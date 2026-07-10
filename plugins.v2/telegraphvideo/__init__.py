@@ -73,6 +73,7 @@ class TelegraphVideo(_PluginBase):
             "file_ext": payload.get("file_ext"),
             "file_size": payload.get("file_size"),
             "organize_mode": payload.get("organize_mode"),
+            "force": payload.get("force") or payload.get("force_transfer") or payload.get("forceTransfer"),
         }
 
     def _source_storage(self, payload: Dict[str, Any]) -> str:
@@ -101,14 +102,21 @@ class TelegraphVideo(_PluginBase):
             return value
         return str(value).strip().lower() in {"1", "true", "yes", "on", "y"}
 
-    def _transfer_options(self) -> Dict[str, Any]:
+    def _transfer_options(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        payload = payload or {}
         target_path = self._config_value('target_path') or None
+        payload_force = self._as_bool(payload.get("force"))
+        if payload_force is None:
+            payload_force = self._as_bool(payload.get("force_transfer"))
+        if payload_force is None:
+            payload_force = self._as_bool(payload.get("forceTransfer"))
+        config_force = self._as_bool(self._config_value("force")) or False
         return {
             "target_storage": self._config_value('target_storage') or None,
             "target_path": Path(target_path) if target_path else None,
             "transfer_type": self._config_value('transfer_type') or None,
             "scrape": self._as_bool(self._config_value('scrape')),
-            "force": self._as_bool(self._config_value("force")) or False,
+            "force": payload_force if payload_force is not None else config_force,
             "background": False,
         }
 
@@ -371,7 +379,7 @@ class TelegraphVideo(_PluginBase):
                 name=work_strm_path.name,
                 size=work_strm_path.stat().st_size if work_strm_path.exists() else None,
             )
-            options = self._transfer_options()
+            options = self._transfer_options(payload)
             fileitem_log = fileitem.model_dump() if hasattr(fileitem, "model_dump") else fileitem.dict()
             logger.info(
                 f"[TelegraphVideo] 调用 MP 原生整理: fileitem={fileitem_log}, "
