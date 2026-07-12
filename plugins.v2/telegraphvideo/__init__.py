@@ -330,7 +330,7 @@ class TelegraphVideo(_PluginBase):
         }
 
     def _post_business_callback(self, callback_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        if not callback_payload.get("scan_item_id") and not callback_payload.get("mp_import_task_item_id"):
+        if not callback_payload.get("scan_item_id") and not callback_payload.get("mp_import_task_id"):
             logger.info("[TelegraphVideo] 整理请求无业务任务标识，跳过业务回调")
             return None
         callback = self._business_callback_config()
@@ -381,7 +381,7 @@ class TelegraphVideo(_PluginBase):
                 "message": "MP入库任务已受理",
                 "plugin_job_id": plugin_job_id,
                 "request_id": payload.get("request_id"),
-                "mp_import_task_item_id": payload.get("mp_import_task_item_id"),
+                "mp_import_task_id": payload.get("mp_import_task_id"),
                 "scan_item_id": payload.get("scan_item_id"),
             }
         summary = self._payload_summary(payload)
@@ -420,7 +420,7 @@ class TelegraphVideo(_PluginBase):
                     "scan_item_id": payload.get("scan_item_id"),
                     "request_id": payload.get("request_id"),
                     "plugin_job_id": payload.get("plugin_job_id"),
-                    "mp_import_task_item_id": payload.get("mp_import_task_item_id"),
+                    "mp_import_task_id": payload.get("mp_import_task_id"),
                     **recognize_payload,
                 }
                 self._post_business_callback(response_payload)
@@ -473,7 +473,7 @@ class TelegraphVideo(_PluginBase):
                 "scan_item_id": payload.get("scan_item_id"),
                 "request_id": payload.get("request_id"),
                 "plugin_job_id": payload.get("plugin_job_id"),
-                "mp_import_task_item_id": payload.get("mp_import_task_item_id"),
+                "mp_import_task_id": payload.get("mp_import_task_id"),
                 **history_payload,
             }
             if not state:
@@ -496,7 +496,7 @@ class TelegraphVideo(_PluginBase):
                 "scan_item_id": payload.get("scan_item_id") if payload else None,
                 "request_id": payload.get("request_id") if payload else None,
                 "plugin_job_id": payload.get("plugin_job_id") if payload else None,
-                "mp_import_task_item_id": payload.get("mp_import_task_item_id") if payload else None,
+                "mp_import_task_id": payload.get("mp_import_task_id") if payload else None,
             }
             self._post_business_callback(failure_payload)
             return failure_payload

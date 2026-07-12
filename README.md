@@ -34,4 +34,4 @@ Required behavior:
 
 - A taken-over `.strm` is not rolled back to the original real URL.
 - The plugin must preserve original STRM content by sending it to the business API before rewriting.
-- Plugin task IDs should be written back to `mp_import_task_item.plugin_task_id` once the plugin protocol is implemented.
+- Resource-level plugin task IDs are returned as `plugin_job_id` and stored directly on `mp_import_task`. Scan-origin requests remain identified by `scan_item_id` until the callback creates a business media resource.
