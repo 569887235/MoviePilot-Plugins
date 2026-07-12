@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import threading
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, Optional
 from urllib import request as urlrequest
@@ -20,7 +21,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.14"
+    plugin_version = "0.1.15"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -60,6 +61,13 @@ class TelegraphVideo(_PluginBase):
                 "methods": ["POST"],
                 "summary": "Telegraph Video scan item organize",
                 "description": "接受业务系统扫描到的视频/STRM条目，并调用 MoviePilot 原生能力整理后返回媒体信息。",
+            },
+            {
+                "path": "/jobs/{request_id}",
+                "endpoint": self.get_job,
+                "methods": ["GET"],
+                "summary": "Telegraph Video organize job status",
+                "description": "按 request_id 查询异步整理任务状态和最终结果。",
             }
         ]
 
@@ -134,6 +142,42 @@ class TelegraphVideo(_PluginBase):
     def _strm_safe_name(name: str) -> str:
         cleaned = "".join(ch if ch not in '\\/?:*"<>|' else "_" for ch in str(name or "source.strm"))
         return cleaned if cleaned.lower().endswith(".strm") else f"{cleaned}.strm"
+
+    @staticmethod
+    def _now_iso() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _job_path(self, request_id: str) -> Path:
+        jobs_dir = self.get_data_path() / "jobs"
+        jobs_dir.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha1(str(request_id).encode("utf-8")).hexdigest()
+        return jobs_dir / f"{digest}.json"
+
+    def _read_job(self, request_id: str) -> Optional[Dict[str, Any]]:
+        path = self._job_path(request_id)
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if data.get("request_id") == request_id else None
+        except Exception as err:
+            logger.warning(f"[TelegraphVideo] 读取任务状态失败: request_id={request_id}, error={err}")
+            return None
+
+    def _write_job(self, request_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        path = self._job_path(request_id)
+        current = self._read_job(request_id) or {"request_id": request_id, "created_at": self._now_iso()}
+        current.update(self._jsonable(updates))
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(json.dumps(current, ensure_ascii=False, default=str), encoding="utf-8")
+        temp_path.replace(path)
+        return current
+
+    def get_job(self, request_id: str) -> dict:
+        job = self._read_job(request_id)
+        if not job:
+            return {"success": True, "data": {"request_id": request_id, "status": "not_found"}}
+        return {"success": True, "data": job}
 
     def _build_work_strm(self, payload: Dict[str, Any]) -> Path:
         strm_content = payload.get("strm_content") or payload.get("strmContent")
@@ -374,6 +418,15 @@ class TelegraphVideo(_PluginBase):
             worker_payload["_async_worker"] = True
             plugin_job_id = payload.get("plugin_job_id") or payload.get("request_id")
             worker_payload["plugin_job_id"] = plugin_job_id
+            request_id = payload.get("request_id") or plugin_job_id
+            self._write_job(request_id, {
+                "plugin_job_id": plugin_job_id,
+                "status": "pending",
+                "organize_mode": self._normalize_mode(payload.get("organize_mode")),
+                "scan_task_id": payload.get("scan_task_id"),
+                "scan_item_id": payload.get("scan_item_id"),
+                "mp_import_task_id": payload.get("mp_import_task_id"),
+            })
             threading.Thread(target=self.organize, args=(worker_payload,), daemon=True, name=f"telegraph-video-{plugin_job_id}").start()
             return {
                 "success": True,
@@ -385,23 +438,39 @@ class TelegraphVideo(_PluginBase):
                 "scan_item_id": payload.get("scan_item_id"),
             }
         summary = self._payload_summary(payload)
+        request_id = payload.get("request_id") or payload.get("plugin_job_id")
+        if request_id:
+            self._write_job(request_id, {"status": "running", "started_at": self._now_iso()})
         logger.info(f"[TelegraphVideo] 收到整理请求: {summary}")
         try:
             if not self._enabled():
                 logger.warning(f"[TelegraphVideo] 整理请求被拒绝，插件未启用: {summary}")
-                return {
+                failure_payload = {
                     "success": False,
                     "message": "Telegraph Video 插件未启用，无法执行整理。",
+                    "request_id": payload.get("request_id"),
+                    "plugin_job_id": payload.get("plugin_job_id"),
+                    "mp_import_task_id": payload.get("mp_import_task_id"),
+                    "scan_item_id": payload.get("scan_item_id"),
                 }
+                if request_id:
+                    self._write_job(request_id, {"status": "failed", "finished_at": self._now_iso(), "result": failure_payload})
+                return failure_payload
 
             source_path = payload.get("source_path")
             if not source_path:
                 logger.warning(f"[TelegraphVideo] 整理请求缺少 source_path: {summary}")
-                return {
+                failure_payload = {
                     "success": False,
                     "message": "整理请求缺少 source_path。",
+                    "request_id": payload.get("request_id"),
+                    "plugin_job_id": payload.get("plugin_job_id"),
+                    "mp_import_task_id": payload.get("mp_import_task_id"),
                     "scan_item_id": payload.get("scan_item_id"),
                 }
+                if request_id:
+                    self._write_job(request_id, {"status": "failed", "finished_at": self._now_iso(), "result": failure_payload})
+                return failure_payload
 
             organize_mode = self._normalize_mode(payload.get("organize_mode"))
             work_strm_path = self._build_work_strm(payload)
@@ -423,7 +492,14 @@ class TelegraphVideo(_PluginBase):
                     "mp_import_task_id": payload.get("mp_import_task_id"),
                     **recognize_payload,
                 }
-                self._post_business_callback(response_payload)
+                callback_result = self._post_business_callback(response_payload)
+                if request_id:
+                    self._write_job(request_id, {
+                        "status": "success",
+                        "finished_at": self._now_iso(),
+                        "result": response_payload,
+                        "callback_delivered": callback_result is not None,
+                    })
                 return response_payload
 
             from app.chain.transfer import TransferChain
@@ -477,10 +553,24 @@ class TelegraphVideo(_PluginBase):
                 **history_payload,
             }
             if not state:
-                self._post_business_callback(response_payload)
+                callback_result = self._post_business_callback(response_payload)
+                if request_id:
+                    self._write_job(request_id, {
+                        "status": "failed",
+                        "finished_at": self._now_iso(),
+                        "result": response_payload,
+                        "callback_delivered": callback_result is not None,
+                    })
                 return response_payload
 
             callback_result = self._post_business_callback(response_payload)
+            if request_id:
+                self._write_job(request_id, {
+                    "status": "success",
+                    "finished_at": self._now_iso(),
+                    "result": response_payload,
+                    "callback_delivered": callback_result is not None,
+                })
             callback_data = callback_result.get("data", callback_result) if isinstance(callback_result, dict) else {}
             stable_play_url = callback_data.get("stable_play_url")
             target_strm_path = history_payload.get("transfer_history", {}).get("dest")
@@ -498,7 +588,15 @@ class TelegraphVideo(_PluginBase):
                 "plugin_job_id": payload.get("plugin_job_id") if payload else None,
                 "mp_import_task_id": payload.get("mp_import_task_id") if payload else None,
             }
-            self._post_business_callback(failure_payload)
+            callback_result = self._post_business_callback(failure_payload)
+            request_id = failure_payload.get("request_id") or failure_payload.get("plugin_job_id")
+            if request_id:
+                self._write_job(request_id, {
+                    "status": "failed",
+                    "finished_at": self._now_iso(),
+                    "result": failure_payload,
+                    "callback_delivered": callback_result is not None,
+                })
             return failure_payload
 
     def get_service(self) -> list:
