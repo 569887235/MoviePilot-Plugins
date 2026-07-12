@@ -1,7 +1,8 @@
 import hashlib
 import json
 import logging
-from pathlib import Path
+import threading
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, Optional
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
@@ -19,7 +20,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.13"
+    plugin_version = "0.1.14"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -219,16 +220,23 @@ class TelegraphVideo(_PluginBase):
         return value
 
     @staticmethod
-    def _media_type(value: Any) -> Optional[str]:
+    def _media_type(value: Any) -> str:
         if value is None:
-            return None
+            return "未知"
         raw = value.value if hasattr(value, "value") else str(value)
-        text = str(raw).strip().lower()
-        if text in {"movie", "电影", "film"}:
-            return "movie"
-        if text in {"tv", "电视剧", "series", "show"}:
-            return "tv"
-        return str(raw)
+        text = str(raw).strip()
+        return text if text in {"电影", "电视剧", "系列", "未知"} else "未知"
+
+
+
+    @staticmethod
+    def _category_path(value: Any) -> Optional[str]:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        path = PureWindowsPath(text) if "\\" in text else PurePosixPath(text)
+        parent = str(path.parent)
+        return parent if parent and parent != "." else None
 
     @staticmethod
     def _first_episode(episodes: Any) -> Optional[int]:
@@ -259,15 +267,19 @@ class TelegraphVideo(_PluginBase):
             "poster": getattr(history, "image", None),
         }
         metadata = {k: v for k, v in metadata.items() if v not in (None, "")}
+        dest = getattr(history, "dest", None)
+        dest_storage = getattr(history, "dest_storage", None)
         return {
             "metadata": metadata,
             "media": metadata,
+            "mp_category_path": self._category_path(dest),
+            "mp_target_storage": dest_storage,
             "transfer_history": {
                 "id": getattr(history, "id", None),
                 "src": getattr(history, "src", None),
                 "src_storage": getattr(history, "src_storage", None),
-                "dest": getattr(history, "dest", None),
-                "dest_storage": getattr(history, "dest_storage", None),
+                "dest": dest,
+                "dest_storage": dest_storage,
                 "mode": getattr(history, "mode", None),
                 "status": getattr(history, "status", None),
                 "errmsg": getattr(history, "errmsg", None),
@@ -317,17 +329,17 @@ class TelegraphVideo(_PluginBase):
             "token": token,
         }
 
-    def _post_business_callback(self, callback_payload: Dict[str, Any]) -> None:
-        if not callback_payload.get("scan_item_id"):
-            logger.info("[TelegraphVideo] 非扫描整理请求无 scan_item_id，跳过业务回调")
-            return
+    def _post_business_callback(self, callback_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not callback_payload.get("scan_item_id") and not callback_payload.get("mp_import_task_item_id"):
+            logger.info("[TelegraphVideo] 整理请求无业务任务标识，跳过业务回调")
+            return None
         callback = self._business_callback_config()
         if not callback["enabled"]:
             logger.info(f"[TelegraphVideo] 业务回调未启用，跳过: scan_item_id={callback_payload.get('scan_item_id')}")
-            return
+            return None
         if not callback["url"]:
             logger.warning(f"[TelegraphVideo] 业务回调地址未配置，跳过: scan_item_id={callback_payload.get('scan_item_id')}")
-            return
+            return None
         body = json.dumps(callback_payload, ensure_ascii=False, default=str).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if callback["token"]:
@@ -340,19 +352,38 @@ class TelegraphVideo(_PluginBase):
                     f"[TelegraphVideo] 业务回调完成: url={callback['url']}, status={resp.status}, "
                     f"scan_item_id={callback_payload.get('scan_item_id')}, response={text[:500]}"
                 )
+                return json.loads(text) if text else {}
         except HTTPError as err:
             text = err.read().decode("utf-8", errors="replace") if err.fp else ""
             logger.error(
                 f"[TelegraphVideo] 业务回调 HTTP 失败: url={callback['url']}, status={err.code}, "
                 f"scan_item_id={callback_payload.get('scan_item_id')}, response={text[:500]}"
             )
+            return None
         except URLError as err:
             logger.error(f"[TelegraphVideo] 业务回调连接失败: url={callback['url']}, scan_item_id={callback_payload.get('scan_item_id')}, error={err}")
+            return None
         except Exception as err:
             logger.exception(f"[TelegraphVideo] 业务回调异常: scan_item_id={callback_payload.get('scan_item_id')}, error={err}")
+            return None
 
     def organize(self, payload: Dict[str, Any]) -> dict:
         payload = payload or {}
+        if payload.get("async_callback") and not payload.get("_async_worker"):
+            worker_payload = dict(payload)
+            worker_payload["_async_worker"] = True
+            plugin_job_id = payload.get("plugin_job_id") or payload.get("request_id")
+            worker_payload["plugin_job_id"] = plugin_job_id
+            threading.Thread(target=self.organize, args=(worker_payload,), daemon=True, name=f"telegraph-video-{plugin_job_id}").start()
+            return {
+                "success": True,
+                "accepted": True,
+                "message": "MP入库任务已受理",
+                "plugin_job_id": plugin_job_id,
+                "request_id": payload.get("request_id"),
+                "mp_import_task_item_id": payload.get("mp_import_task_item_id"),
+                "scan_item_id": payload.get("scan_item_id"),
+            }
         summary = self._payload_summary(payload)
         logger.info(f"[TelegraphVideo] 收到整理请求: {summary}")
         try:
@@ -387,6 +418,9 @@ class TelegraphVideo(_PluginBase):
                     "strm_path": str(work_strm_path),
                     "scan_task_id": payload.get("scan_task_id"),
                     "scan_item_id": payload.get("scan_item_id"),
+                    "request_id": payload.get("request_id"),
+                    "plugin_job_id": payload.get("plugin_job_id"),
+                    "mp_import_task_item_id": payload.get("mp_import_task_item_id"),
                     **recognize_payload,
                 }
                 self._post_business_callback(response_payload)
@@ -437,21 +471,35 @@ class TelegraphVideo(_PluginBase):
                 "strm_path": str(work_strm_path),
                 "scan_task_id": payload.get("scan_task_id"),
                 "scan_item_id": payload.get("scan_item_id"),
+                "request_id": payload.get("request_id"),
+                "plugin_job_id": payload.get("plugin_job_id"),
+                "mp_import_task_item_id": payload.get("mp_import_task_item_id"),
                 **history_payload,
             }
             if not state:
                 self._post_business_callback(response_payload)
                 return response_payload
 
-            self._post_business_callback(response_payload)
+            callback_result = self._post_business_callback(response_payload)
+            callback_data = callback_result.get("data", callback_result) if isinstance(callback_result, dict) else {}
+            stable_play_url = callback_data.get("stable_play_url")
+            target_strm_path = history_payload.get("transfer_history", {}).get("dest")
+            if stable_play_url and target_strm_path:
+                Path(target_strm_path).write_text(str(stable_play_url).strip() + "\n", encoding="utf-8")
+                logger.info(f"[TelegraphVideo] 已将目标 STRM 改写为业务播放入口: path={target_strm_path}, media_id={callback_data.get('media_id')}")
             return response_payload
         except Exception as err:
             logger.exception(f"[TelegraphVideo] 整理请求处理异常: {summary}")
-            return {
+            failure_payload = {
                 "success": False,
                 "message": f"Telegraph Video 插件整理异常: {err}",
                 "scan_item_id": payload.get("scan_item_id") if payload else None,
+                "request_id": payload.get("request_id") if payload else None,
+                "plugin_job_id": payload.get("plugin_job_id") if payload else None,
+                "mp_import_task_item_id": payload.get("mp_import_task_item_id") if payload else None,
             }
+            self._post_business_callback(failure_payload)
+            return failure_payload
 
     def get_service(self) -> list:
         return []
