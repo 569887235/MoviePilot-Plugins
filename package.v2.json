@@ -3,7 +3,7 @@
     "name": "Telegraph Video",
     "description": "Telegraph Video MP 接入插件，用于接收扫描条目并调用 MoviePilot 原生整理能力。",
     "labels": "媒体库,STRM,Telegraph Video",
-    "version": "0.1.15",
+    "version": "0.1.16",
     "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png",
     "author": "telegraph-video",
     "level": 1,

@@ -21,7 +21,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.15"
+    plugin_version = "0.1.16"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -190,13 +190,31 @@ class TelegraphVideo(_PluginBase):
                 return Path(source_path)
             raise ValueError("缺少 strm_content 或 strm_play_url，无法整理 STRM")
         data_dir = self.get_data_path() / "business_strm"
-        data_dir.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha1(str(payload.get("source_path") or payload.get("source_name") or strm_content).encode("utf-8")).hexdigest()[:12]
-        file_name = self._strm_safe_name(payload.get("source_name") or f"telegraph-video-{digest}.strm")
-        strm_path = data_dir / f"{digest}-{file_name}"
+        work_dir = data_dir / digest
+        work_dir.mkdir(parents=True, exist_ok=True)
+        file_name = self._strm_safe_name(payload.get("source_name") or "telegraph-video.strm")
+        strm_path = work_dir / file_name
         strm_path.write_text(str(strm_content).strip() + "\n", encoding="utf-8")
         logger.info(f"[TelegraphVideo] 已生成临时 STRM: {strm_path}")
         return strm_path
+
+    def _cleanup_work_strm(self, strm_path: Optional[Path]) -> None:
+        if not strm_path:
+            return
+        data_dir = self.get_data_path() / "business_strm"
+        try:
+            resolved_path = strm_path.resolve()
+            resolved_dir = data_dir.resolve()
+            if resolved_dir not in resolved_path.parents:
+                return
+            resolved_path.unlink(missing_ok=True)
+            parent = resolved_path.parent
+            if parent != resolved_dir:
+                parent.rmdir()
+            logger.info(f"[TelegraphVideo] 已清理临时 STRM: {resolved_path}")
+        except OSError as err:
+            logger.warning(f"[TelegraphVideo] 清理临时 STRM 失败: path={strm_path}, error={err}")
 
     @staticmethod
     def _jsonable(value: Any, depth: int = 0) -> Any:
@@ -244,7 +262,8 @@ class TelegraphVideo(_PluginBase):
             "overview": media_info.get("overview"),
         }
         metadata = {k: v for k, v in metadata.items() if v not in (None, "")}
-        return {"metadata": metadata, "media": metadata, "recognize_result": context_dict}
+        recognized = bool(media_info and media_info.get("title"))
+        return {"recognized": recognized, "metadata": metadata, "media": metadata, "recognize_result": context_dict}
 
     def _recognize_strm(self, strm_path: Path) -> Dict[str, Any]:
         from app.chain.media import MediaChain
@@ -442,6 +461,7 @@ class TelegraphVideo(_PluginBase):
         if request_id:
             self._write_job(request_id, {"status": "running", "started_at": self._now_iso()})
         logger.info(f"[TelegraphVideo] 收到整理请求: {summary}")
+        work_strm_path = None
         try:
             if not self._enabled():
                 logger.warning(f"[TelegraphVideo] 整理请求被拒绝，插件未启用: {summary}")
@@ -478,9 +498,10 @@ class TelegraphVideo(_PluginBase):
 
             if organize_mode == "recognize":
                 recognize_payload = self._recognize_strm(work_strm_path)
+                recognized = bool(recognize_payload.get("recognized"))
                 response_payload = {
-                    "success": True,
-                    "message": "识别完成",
+                    "success": recognized,
+                    "message": "识别完成" if recognized else "未识别到媒体信息",
                     "organize_mode": organize_mode,
                     "source_path": source_path,
                     "source_name": payload.get("source_name"),
@@ -495,7 +516,7 @@ class TelegraphVideo(_PluginBase):
                 callback_result = self._post_business_callback(response_payload)
                 if request_id:
                     self._write_job(request_id, {
-                        "status": "success",
+                        "status": "success" if recognized else "failed",
                         "finished_at": self._now_iso(),
                         "result": response_payload,
                         "callback_delivered": callback_result is not None,
@@ -598,6 +619,8 @@ class TelegraphVideo(_PluginBase):
                     "callback_delivered": callback_result is not None,
                 })
             return failure_payload
+        finally:
+            self._cleanup_work_strm(work_strm_path)
 
     def get_service(self) -> list:
         return []
