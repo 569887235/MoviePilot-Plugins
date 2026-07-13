@@ -3,7 +3,7 @@
     "name": "Telegraph Video",
     "description": "Telegraph Video MP 接入插件，用于接收扫描条目并调用 MoviePilot 原生整理能力。",
     "labels": "媒体库,STRM,Telegraph Video",
-    "version": "0.1.17",
+    "version": "0.1.18",
     "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png",
     "author": "telegraph-video",
     "level": 1,
@@ -25,7 +25,8 @@
       "v0.1.14": "同步 MoviePilot 官方媒体类型并回传整理分类目录",
       "v0.1.15": "持久化异步整理任务状态并支持按 request_id 主动查询结果",
       "v0.1.16": "识别模式保留原始 STRM 文件名，避免异步识别时名称丢失",
-      "v0.1.17": "补充上映时间、评分、分级、时长、类型、制作公司、演职员和外部编号等完整元数据回传"
+      "v0.1.17": "补充上映时间、评分、分级、时长、类型、制作公司、演职员和外部编号等完整元数据回传",
+      "v0.1.18": "临时 STRM 路径增加随机串，避免 MoviePilot 媒体识别缓存复用旧结果"
     }
   }
 }
