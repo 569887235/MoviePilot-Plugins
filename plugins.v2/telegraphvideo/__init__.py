@@ -248,18 +248,42 @@ class TelegraphVideo(_PluginBase):
         media_type = media_info.get("type")
         if hasattr(media_type, "value"):
             media_type = media_type.value
+        provider_ids = media_info.get("provider_ids") or media_info.get("providerIds") or {}
+        runtime_seconds = media_info.get("runtime_seconds") or media_info.get("runtimeSeconds")
+        runtime_minutes = media_info.get("runtime") or media_info.get("runtime_minutes")
+        if not runtime_seconds and runtime_minutes:
+            try:
+                runtime_seconds = int(float(runtime_minutes) * 60)
+            except (TypeError, ValueError):
+                runtime_seconds = None
         metadata = {
             "title": media_info.get("title") or meta_info.get("title") or meta_info.get("name"),
             "original_title": media_info.get("original_title") or media_info.get("en_title"),
             "year": media_info.get("year") or meta_info.get("year"),
             "media_type": TelegraphVideo._media_type(media_type or meta_info.get("type")),
-            "tmdb_id": media_info.get("tmdb_id") or meta_info.get("tmdbid"),
-            "imdb_id": media_info.get("imdb_id"),
-            "douban_id": media_info.get("douban_id") or meta_info.get("doubanid"),
-            "season_number": media_info.get("season") or meta_info.get("begin_season"),
-            "episode_number": meta_info.get("begin_episode"),
-            "poster": media_info.get("poster_path"),
-            "overview": media_info.get("overview"),
+            "tmdb_id": media_info.get("tmdb_id") or provider_ids.get("tmdb") or meta_info.get("tmdbid"),
+            "imdb_id": media_info.get("imdb_id") or provider_ids.get("imdb"),
+            "douban_id": media_info.get("douban_id") or provider_ids.get("douban") or meta_info.get("doubanid"),
+            "tvdb_id": media_info.get("tvdb_id") or provider_ids.get("tvdb"),
+            "season_number": media_info.get("season") or media_info.get("season_number") or meta_info.get("begin_season"),
+            "episode_number": media_info.get("episode_number") or meta_info.get("begin_episode"),
+            "poster_url": media_info.get("poster_path") or media_info.get("poster_url") or media_info.get("poster"),
+            "backdrop_url": media_info.get("backdrop_path") or media_info.get("backdrop_url") or media_info.get("backdrop"),
+            "logo_url": media_info.get("logo_path") or media_info.get("logo_url") or media_info.get("logo"),
+            "trailer_url": media_info.get("trailer_url") or media_info.get("trailer"),
+            "overview": media_info.get("overview") or media_info.get("plot"),
+            "premiere_date": media_info.get("premiere_date") or media_info.get("release_date") or media_info.get("air_date"),
+            "official_rating": media_info.get("official_rating") or media_info.get("content_rating"),
+            "community_rating": media_info.get("community_rating") or media_info.get("vote_average") or media_info.get("rating"),
+            "critic_rating": media_info.get("critic_rating"),
+            "runtime_seconds": runtime_seconds,
+            "genres": media_info.get("genres") or media_info.get("genre"),
+            "tags": media_info.get("tags"),
+            "studios": media_info.get("studios") or media_info.get("production_companies"),
+            "people": media_info.get("people") or media_info.get("actors") or media_info.get("credits"),
+            "episode_title": media_info.get("episode_title"),
+            "episode_overview": media_info.get("episode_overview"),
+            "episode_premiere_date": media_info.get("episode_premiere_date") or media_info.get("episode_air_date"),
         }
         metadata = {k: v for k, v in metadata.items() if v not in (None, "")}
         recognized = bool(media_info and media_info.get("title"))
