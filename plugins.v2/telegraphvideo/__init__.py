@@ -21,7 +21,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.16"
+    plugin_version = "0.1.17"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
