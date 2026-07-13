@@ -22,7 +22,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.18"
+    plugin_version = "0.1.19"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -193,10 +193,11 @@ class TelegraphVideo(_PluginBase):
         data_dir = self.get_data_path() / "business_strm"
         digest = hashlib.sha1(str(payload.get("source_path") or payload.get("source_name") or strm_content).encode("utf-8")).hexdigest()[:12]
         random_suffix = secrets.token_hex(6)
-        work_dir = data_dir / f"{digest}-{random_suffix}"
+        work_dir = data_dir / digest
         work_dir.mkdir(parents=True, exist_ok=True)
         file_name = self._strm_safe_name(payload.get("source_name") or "telegraph-video.strm")
-        strm_path = work_dir / file_name
+        file_path = Path(file_name)
+        strm_path = work_dir / f"{file_path.stem}-{random_suffix}{file_path.suffix}"
         strm_path.write_text(str(strm_content).strip() + "\n", encoding="utf-8")
         logger.info(f"[TelegraphVideo] 已生成临时 STRM: {strm_path}")
         return strm_path
