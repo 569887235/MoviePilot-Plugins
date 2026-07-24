@@ -12,6 +12,7 @@ This repository follows the MoviePilot official plugin repository layout:
 Current state:
 
 - The plugin exposes `POST /api/v1/plugin/TelegraphVideo/organize`.
+- The plugin exposes `POST /api/v1/plugin/TelegraphVideo/rewrite-strm` for source-switch URL refreshes.
 - The organize endpoint calls MoviePilot `TransferChain().manual_transfer(...)`.
 - Enable the plugin interface in MoviePilot plugin settings before calling it.
 
@@ -26,12 +27,13 @@ Responsibilities:
 - Discover existing MP media items and `.strm` files.
 - Push MP media to `POST /api/business/media/mp-push`.
 - Rewrite MP `.strm` files to the returned business play URL.
-- Execute business-originated MP import tasks by writing `.strm` files containing `/play/{mediaId}`.
+- Execute business-originated MP import tasks by writing `.strm` files containing `/play/{mediaId}/{中文规范名}.m3u8`.
 - Default business `transfer` requests to forced MoviePilot transfer, pass request-level `force=true`, and clear the matching old transfer history so explicit re-import can restore MP-side items deleted outside Telegraph Video.
 - Backfill scraped metadata through `POST /api/business/media/mp-backfill`.
 
 Required behavior:
 
 - A taken-over `.strm` is not rolled back to the original real URL.
+- A source-switch rewrite must update only the existing target STRM content and must not trigger MoviePilot recognition or transfer.
 - The plugin must preserve original STRM content by sending it to the business API before rewriting.
 - Resource-level plugin task IDs are returned as `plugin_job_id` and stored directly on `mp_import_task`. Scan-origin requests remain identified by `scan_item_id` until the callback creates a business media resource.

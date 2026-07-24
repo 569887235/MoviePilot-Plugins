@@ -22,7 +22,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.19"
+    plugin_version = "0.1.20"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -62,6 +62,13 @@ class TelegraphVideo(_PluginBase):
                 "methods": ["POST"],
                 "summary": "Telegraph Video scan item organize",
                 "description": "接受业务系统扫描到的视频/STRM条目，并调用 MoviePilot 原生能力整理后返回媒体信息。",
+            },
+            {
+                "path": "/rewrite-strm",
+                "endpoint": self.rewrite_strm,
+                "methods": ["POST"],
+                "summary": "Rewrite an existing Telegraph Video STRM URL",
+                "description": "按业务系统提供的目标路径，将已有 STRM 内容改写为新的稳定播放地址。",
             },
             {
                 "path": "/jobs/{request_id}",
@@ -456,6 +463,42 @@ class TelegraphVideo(_PluginBase):
         except Exception as err:
             logger.exception(f"[TelegraphVideo] 业务回调异常: scan_item_id={callback_payload.get('scan_item_id')}, error={err}")
             return None
+
+    def rewrite_strm(self, payload: Dict[str, Any]) -> dict:
+        payload = payload or {}
+        media_id = payload.get("media_id")
+        strm_path = str(payload.get("strm_path") or "").strip()
+        play_url = str(payload.get("play_url") or "").strip()
+        if not self._enabled():
+            return {"success": False, "message": "Telegraph Video 插件未启用，无法改写 STRM。"}
+        if not strm_path:
+            return {"success": False, "message": "STRM 改写请求缺少 strm_path。", "media_id": media_id}
+        if not play_url.startswith(("http://", "https://")):
+            return {"success": False, "message": "STRM 改写请求缺少有效的 HTTP/HTTPS play_url。", "media_id": media_id}
+
+        target = Path(strm_path)
+        if target.suffix.lower() != ".strm":
+            return {"success": False, "message": "目标文件不是 .strm 文件。", "media_id": media_id, "strm_path": strm_path}
+        if not target.is_file():
+            return {"success": False, "message": "目标 STRM 文件不存在。", "media_id": media_id, "strm_path": strm_path}
+        try:
+            target.write_text(play_url + "\n", encoding="utf-8")
+            logger.info(f"[TelegraphVideo] 已按切源请求改写 STRM: media_id={media_id}, path={target}, play_url={play_url}")
+            return {
+                "success": True,
+                "message": "STRM 地址已更新",
+                "media_id": media_id,
+                "strm_path": str(target),
+                "play_url": play_url,
+            }
+        except Exception as err:
+            logger.exception(f"[TelegraphVideo] STRM 改写失败: media_id={media_id}, path={target}, error={err}")
+            return {
+                "success": False,
+                "message": f"STRM 改写失败: {err}",
+                "media_id": media_id,
+                "strm_path": str(target),
+            }
 
     def organize(self, payload: Dict[str, Any]) -> dict:
         payload = payload or {}
