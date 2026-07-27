@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import re
 import secrets
 import threading
 from datetime import datetime, timezone
@@ -23,7 +24,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.24"
+    plugin_version = "0.1.25"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -402,7 +403,113 @@ class TelegraphVideo(_PluginBase):
             selected.setdefault("landscape_url", selected["thumb_url"])
         if selected.get("landscape_url"):
             selected.setdefault("thumb_url", selected["landscape_url"])
+
         return selected
+
+    @staticmethod
+    def _standard_image_type(stem: Any) -> str:
+        text = str(stem or "").strip()
+        compact = re.sub(r"[_\-\s]+", "", text).lower()
+        known = {
+            "poster": "POSTER",
+            "backdrop": "BACKDROP",
+            "fanart": "FANART",
+            "logo": "LOGO",
+            "clearlogo": "CLEARLOGO",
+            "thumb": "THUMB",
+            "thumbnail": "THUMB",
+            "landscape": "LANDSCAPE",
+            "art": "ART",
+            "clearart": "CLEARART",
+            "banner": "BANNER",
+            "still": "STILL",
+        }
+        if compact in known:
+            return known[compact]
+        dynamic = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", text)
+        dynamic = re.sub(r"[^a-zA-Z0-9]+", "_", dynamic).strip("_").upper()
+        return dynamic[:128] or "OTHER"
+
+    @classmethod
+    def _scraped_file_images(
+        cls,
+        images: Any,
+        season_number: Any = None,
+        episode_number: Any = None,
+    ) -> list:
+        try:
+            current_season = int(season_number) if season_number is not None else None
+        except (TypeError, ValueError):
+            current_season = None
+        try:
+            current_episode = int(episode_number) if episode_number is not None else None
+        except (TypeError, ValueError):
+            current_episode = None
+
+        selected = {}
+        aliases = {
+            "BACKDROP": ("FANART",),
+            "FANART": ("BACKDROP",),
+            "THUMB": ("LANDSCAPE",),
+            "LANDSCAPE": ("THUMB",),
+        }
+
+        def add(payload: Optional[Dict[str, Any]]) -> None:
+            if not payload:
+                return
+            key = (
+                payload.get("owner_type"),
+                payload.get("season_number"),
+                payload.get("episode_number"),
+                payload.get("image_type"),
+            )
+            selected.setdefault(key, payload)
+
+        for filename, url in (images or {}).items():
+            stem = Path(str(filename)).stem.strip()
+            owner_type = "item"
+            owner_season = None
+            owner_episode = None
+            image_stem = stem
+
+            season_match = re.fullmatch(r"season(?:(\d+)|[-_]?specials)[-_](.+)", stem, re.IGNORECASE)
+            if season_match:
+                owner_type = "season"
+                owner_season = int(season_match.group(1)) if season_match.group(1) else 0
+                image_stem = season_match.group(2)
+            else:
+                generic_season = re.fullmatch(r"season[-_](.+)", stem, re.IGNORECASE)
+                episode_match = re.fullmatch(r"episode[-_](.+)", stem, re.IGNORECASE)
+                if generic_season:
+                    if current_season is None:
+                        continue
+                    owner_type = "season"
+                    owner_season = current_season
+                    image_stem = generic_season.group(1)
+                elif episode_match:
+                    if current_season is None or current_episode is None:
+                        continue
+                    owner_type = "episode"
+                    owner_season = current_season
+                    owner_episode = current_episode
+                    image_stem = episode_match.group(1)
+
+            image_type = cls._standard_image_type(image_stem)
+            if owner_type == "episode" and image_type in {"THUMB", "STILL"}:
+                image_type = "STILL"
+            payload = cls._image_payload(
+                owner_type,
+                image_type,
+                {"url": str(url)},
+                owner_season,
+                owner_episode,
+            )
+            add(payload)
+            if payload and owner_type == "item":
+                for alias in aliases.get(image_type, ()):
+                    add({**payload, "image_type": alias})
+        return list(selected.values())
+
 
     def _selected_images(
         self,
@@ -565,7 +672,22 @@ class TelegraphVideo(_PluginBase):
             **(payload.get("metadata") or {}),
             **scraped_metadata,
         }
-        payload["images"] = self._selected_images(selection_metadata, media_chain)
+        selected_images = self._selected_images(selection_metadata, media_chain)
+        scraped_file_images = self._scraped_file_images(
+            scraped_images,
+            selection_metadata.get("season_number"),
+            selection_metadata.get("episode_number"),
+        )
+        images_by_key = {}
+        for image in [*selected_images, *scraped_file_images]:
+            key = (
+                image.get("owner_type"),
+                image.get("season_number"),
+                image.get("episode_number"),
+                image.get("image_type"),
+            )
+            images_by_key[key] = image
+        payload["images"] = list(images_by_key.values())
         if scraped_images:
             logger.info(
                 f"[TelegraphVideo] 标准刮削图片已加入回调: names={list(scraped_images.keys())}"
