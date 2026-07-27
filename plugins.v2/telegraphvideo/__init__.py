@@ -24,7 +24,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.25"
+    plugin_version = "0.1.26"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -279,10 +279,7 @@ class TelegraphVideo(_PluginBase):
         if tmdb_path:
             return {
                 "origin_type": "TMDB",
-                "origin_file_path": tmdb_path,
                 "origin_url": settings.TMDB_IMAGE_URL(tmdb_path),
-                "tmdb_file_path": tmdb_path,
-                "tmdb_url": settings.TMDB_IMAGE_URL(tmdb_path),
             }
         try:
             parsed = urlparse(text)
@@ -298,7 +295,6 @@ class TelegraphVideo(_PluginBase):
         )
         return {
             "origin_type": origin_type,
-            "origin_file_path": parsed.path or None,
             "origin_url": text,
         }
 
@@ -344,6 +340,20 @@ class TelegraphVideo(_PluginBase):
             languages.append(original)
         return ",".join(languages)
 
+    @staticmethod
+    def _standard_file_name(image_type: str, origin_url: Any, value: Any = None) -> str:
+        explicit = Path(str(value or "")).name.strip()
+        source_suffix = Path(urlparse(str(origin_url or "")).path).suffix.lower()
+        suffix = source_suffix if source_suffix and len(source_suffix) <= 11 else ".jpg"
+        if explicit:
+            return explicit if Path(explicit).suffix else explicit + suffix
+        stem = (
+            "thumb"
+            if image_type == "STILL"
+            else str(image_type or "OTHER").lower().replace("_", "-")
+        )
+        return stem + suffix
+
     @classmethod
     def _image_payload(
         cls,
@@ -356,9 +366,15 @@ class TelegraphVideo(_PluginBase):
         origin = cls._origin_image((candidate or {}).get("url") or (candidate or {}).get("file_path"))
         if not origin:
             return None
+        file_name = cls._standard_file_name(
+            image_type,
+            origin.get("origin_url"),
+            (candidate or {}).get("file_name"),
+        )
         payload = {
             "owner_type": owner_type,
             "image_type": image_type,
+            "file_name": file_name,
             **origin,
         }
         if season_number is not None:
@@ -500,14 +516,18 @@ class TelegraphVideo(_PluginBase):
             payload = cls._image_payload(
                 owner_type,
                 image_type,
-                {"url": str(url)},
+                {"url": str(url), "file_name": image_stem + (Path(str(filename)).suffix or ".jpg")},
                 owner_season,
                 owner_episode,
             )
             add(payload)
             if payload and owner_type == "item":
                 for alias in aliases.get(image_type, ()):
-                    add({**payload, "image_type": alias})
+                    add({
+                        **payload,
+                        "image_type": alias,
+                        "file_name": cls._standard_file_name(alias, payload.get("origin_url")),
+                    })
         return list(selected.values())
 
 
