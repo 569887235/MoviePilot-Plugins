@@ -23,7 +23,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.23"
+    plugin_version = "0.1.24"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -374,16 +374,16 @@ class TelegraphVideo(_PluginBase):
     @classmethod
     def _metadata_from_scraped_images(cls, images: Any) -> Dict[str, Any]:
         specs = {
-            "poster": ("poster_url", 10),
-            "backdrop": ("backdrop_url", 20),
-            "fanart": ("backdrop_url", 10),
-            "logo": ("logo_url", 10),
-            "clearlogo": ("logo_url", 20),
-            "thumb": ("thumb_url", 20),
-            "landscape": ("thumb_url", 10),
-            "art": ("art_url", 10),
-            "clearart": ("art_url", 20),
-            "banner": ("banner_url", 10),
+            "poster": "poster_url",
+            "backdrop": "backdrop_url",
+            "fanart": "fanart_url",
+            "logo": "logo_url",
+            "clearlogo": "clearlogo_url",
+            "thumb": "thumb_url",
+            "landscape": "landscape_url",
+            "art": "art_url",
+            "clearart": "clearart_url",
+            "banner": "banner_url",
         }
         selected = {}
         for filename, url in (images or {}).items():
@@ -391,13 +391,18 @@ class TelegraphVideo(_PluginBase):
             spec = specs.get(stem)
             if not spec or not cls._origin_image(url):
                 continue
-            field, priority = spec
-            if field not in selected or priority > selected[field][0]:
-                selected[field] = (priority, str(url))
-        return {
-            field: value
-            for field, (_, value) in selected.items()
-        }
+            selected[spec] = str(url)
+
+        # MoviePilot writes these pairs as separate standardized files.
+        if selected.get("backdrop_url"):
+            selected.setdefault("fanart_url", selected["backdrop_url"])
+        if selected.get("fanart_url"):
+            selected.setdefault("backdrop_url", selected["fanart_url"])
+        if selected.get("thumb_url"):
+            selected.setdefault("landscape_url", selected["thumb_url"])
+        if selected.get("landscape_url"):
+            selected.setdefault("thumb_url", selected["landscape_url"])
+        return selected
 
     def _selected_images(
         self,
@@ -430,13 +435,17 @@ class TelegraphVideo(_PluginBase):
         root_specs = [
             ("POSTER", "posters", metadata.get("poster_url") or metadata.get("poster")),
             ("BACKDROP", "backdrops", metadata.get("backdrop_url") or metadata.get("backdrop")),
+            ("FANART", None, metadata.get("fanart_url") or metadata.get("fanart")),
             ("LOGO", "logos", metadata.get("logo_url") or metadata.get("logo")),
-            ("THUMB", None, metadata.get("thumb_url") or metadata.get("landscape_url")),
-            ("ART", None, metadata.get("art_url") or metadata.get("clearart_url")),
+            ("CLEARLOGO", None, metadata.get("clearlogo_url") or metadata.get("clearlogo")),
+            ("THUMB", None, metadata.get("thumb_url") or metadata.get("thumb")),
+            ("LANDSCAPE", None, metadata.get("landscape_url") or metadata.get("landscape")),
+            ("ART", None, metadata.get("art_url") or metadata.get("art")),
+            ("CLEARART", None, metadata.get("clearart_url") or metadata.get("clearart")),
             ("BANNER", None, metadata.get("banner_url")),
         ]
         for image_type, key, fallback in root_specs:
-            candidate = (self._pick_tmdb_image(root_images.get(key)) if key else None) or self._fallback_candidate(fallback)
+            candidate = self._fallback_candidate(fallback) or (self._pick_tmdb_image(root_images.get(key)) if key else None)
             payload = self._image_payload("item", image_type, candidate)
             if payload:
                 images.append(payload)
@@ -509,10 +518,14 @@ class TelegraphVideo(_PluginBase):
             "season_number": media_info.get("season") or media_info.get("season_number") or meta_info.get("begin_season"),
             "episode_number": media_info.get("episode_number") or meta_info.get("begin_episode"),
             "poster_url": media_info.get("poster_path") or media_info.get("poster_url") or media_info.get("poster"),
-            "backdrop_url": media_info.get("backdrop_path") or media_info.get("fanart_path") or media_info.get("backdrop_url") or media_info.get("backdrop"),
-            "logo_url": media_info.get("clearlogo_path") or media_info.get("logo_path") or media_info.get("logo_url") or media_info.get("logo"),
-            "thumb_url": media_info.get("thumb_path") or media_info.get("landscape_path") or media_info.get("thumb_url") or media_info.get("landscape"),
-            "art_url": media_info.get("clearart_path") or media_info.get("art_path") or media_info.get("art_url") or media_info.get("clearart"),
+            "backdrop_url": media_info.get("backdrop_path") or media_info.get("backdrop_url") or media_info.get("backdrop"),
+            "fanart_url": media_info.get("fanart_path") or media_info.get("fanart_url") or media_info.get("fanart"),
+            "logo_url": media_info.get("logo_path") or media_info.get("logo_url") or media_info.get("logo"),
+            "clearlogo_url": media_info.get("clearlogo_path") or media_info.get("clearlogo_url") or media_info.get("clearlogo"),
+            "thumb_url": media_info.get("thumb_path") or media_info.get("thumb_url") or media_info.get("thumb"),
+            "landscape_url": media_info.get("landscape_path") or media_info.get("landscape_url") or media_info.get("landscape"),
+            "art_url": media_info.get("art_path") or media_info.get("art_url") or media_info.get("art"),
+            "clearart_url": media_info.get("clearart_path") or media_info.get("clearart_url") or media_info.get("clearart"),
             "banner_url": media_info.get("banner_path") or media_info.get("banner_url") or media_info.get("banner"),
             "trailer_url": media_info.get("trailer_url") or media_info.get("trailer"),
             "overview": media_info.get("overview") or media_info.get("plot"),

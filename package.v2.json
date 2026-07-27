@@ -3,7 +3,7 @@
     "name": "Telegraph Video",
     "description": "Telegraph Video MP 接入插件，用于接收扫描条目并调用 MoviePilot 原生整理能力。",
     "labels": "媒体库,STRM,Telegraph Video",
-    "version": "0.1.23",
+    "version": "0.1.24",
     "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png",
     "author": "telegraph-video",
     "level": 1,
@@ -31,7 +31,8 @@
       "v0.1.20": "新增已有 STRM 地址重写 API，支持业务系统切换播放源后同步更新",
       "v0.1.21": "整理回调新增 TMDB 图片解析，按中文优先选择剧集、季和单集图片",
       "v0.1.22": "补齐 MoviePilot 标准化海报、背景、Logo、缩略图、Banner 和 ClearArt 图片",
-      "v0.1.23": "直接读取 MoviePilot metadata_img 刮削字典，修复缩略图、Banner 和 ClearArt 未回传"
+      "v0.1.23": "直接读取 MoviePilot metadata_img 刮削字典，修复缩略图、Banner 和 ClearArt 未回传",
+      "v0.1.24": "按 MoviePilot 实际刮削文件结构分别回传 Fanart、Landscape、ClearLogo 和 ClearArt"
     }
   }
 }
