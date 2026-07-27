@@ -23,7 +23,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.22"
+    plugin_version = "0.1.23"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -371,6 +371,34 @@ class TelegraphVideo(_PluginBase):
         text = str(value or "").strip()
         return {"url": text} if cls._origin_image(text) else None
 
+    @classmethod
+    def _metadata_from_scraped_images(cls, images: Any) -> Dict[str, Any]:
+        specs = {
+            "poster": ("poster_url", 10),
+            "backdrop": ("backdrop_url", 20),
+            "fanart": ("backdrop_url", 10),
+            "logo": ("logo_url", 10),
+            "clearlogo": ("logo_url", 20),
+            "thumb": ("thumb_url", 20),
+            "landscape": ("thumb_url", 10),
+            "art": ("art_url", 10),
+            "clearart": ("art_url", 20),
+            "banner": ("banner_url", 10),
+        }
+        selected = {}
+        for filename, url in (images or {}).items():
+            stem = Path(str(filename)).stem.lower().replace("_", "").replace("-", "")
+            spec = specs.get(stem)
+            if not spec or not cls._origin_image(url):
+                continue
+            field, priority = spec
+            if field not in selected or priority > selected[field][0]:
+                selected[field] = (priority, str(url))
+        return {
+            field: value
+            for field, (_, value) in selected.items()
+        }
+
     def _selected_images(
         self,
         metadata: Dict[str, Any],
@@ -510,7 +538,25 @@ class TelegraphVideo(_PluginBase):
         media_chain = MediaChain()
         context = media_chain.recognize_by_path(str(strm_path), obtain_images=True)
         payload = self._context_to_payload(context)
-        payload["images"] = self._selected_images(payload.get("metadata") or {}, media_chain)
+        scraped_images = {}
+        media_info = getattr(context, "media_info", None)
+        if media_info:
+            try:
+                scraped_images = media_chain.metadata_img(mediainfo=media_info) or {}
+            except Exception as err:
+                logger.warning(
+                    f"[TelegraphVideo] 获取 MoviePilot 标准刮削图片字典失败: path={strm_path}, error={err}"
+                )
+        scraped_metadata = self._metadata_from_scraped_images(scraped_images)
+        selection_metadata = {
+            **(payload.get("metadata") or {}),
+            **scraped_metadata,
+        }
+        payload["images"] = self._selected_images(selection_metadata, media_chain)
+        if scraped_images:
+            logger.info(
+                f"[TelegraphVideo] 标准刮削图片已加入回调: names={list(scraped_images.keys())}"
+            )
         return payload
 
     def _recognize_images_best_effort(self, strm_path: Path) -> list:
