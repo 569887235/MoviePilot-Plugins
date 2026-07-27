@@ -23,7 +23,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.21"
+    plugin_version = "0.1.22"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -268,6 +268,39 @@ class TelegraphVideo(_PluginBase):
             return None
         return "/" + sized_path.split("/", 1)[1].lstrip("/")
 
+    @classmethod
+    def _origin_image(cls, value: Any) -> Optional[Dict[str, Any]]:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        from app.core.config import settings
+        tmdb_path = cls._tmdb_file_path(text)
+        if tmdb_path:
+            return {
+                "origin_type": "TMDB",
+                "origin_file_path": tmdb_path,
+                "origin_url": settings.TMDB_IMAGE_URL(tmdb_path),
+                "tmdb_file_path": tmdb_path,
+                "tmdb_url": settings.TMDB_IMAGE_URL(tmdb_path),
+            }
+        try:
+            parsed = urlparse(text)
+        except ValueError:
+            return None
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return None
+        hostname = (parsed.hostname or "").lower()
+        origin_type = (
+            "FANART"
+            if hostname == "fanart.tv" or hostname.endswith(".fanart.tv")
+            else "EXTERNAL"
+        )
+        return {
+            "origin_type": origin_type,
+            "origin_file_path": parsed.path or None,
+            "origin_url": text,
+        }
+
     @staticmethod
     def _image_language_tier(value: Any) -> int:
         language = str(value or "").strip().lower().replace("_", "-")
@@ -319,15 +352,13 @@ class TelegraphVideo(_PluginBase):
         season_number: Optional[int] = None,
         episode_number: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
-        file_path = cls._tmdb_file_path((candidate or {}).get("file_path"))
-        if not file_path:
+        origin = cls._origin_image((candidate or {}).get("url") or (candidate or {}).get("file_path"))
+        if not origin:
             return None
-        from app.core.config import settings
         payload = {
             "owner_type": owner_type,
             "image_type": image_type,
-            "tmdb_file_path": file_path,
-            "tmdb_url": settings.TMDB_IMAGE_URL(file_path),
+            **origin,
         }
         if season_number is not None:
             payload["season_number"] = season_number
@@ -337,44 +368,47 @@ class TelegraphVideo(_PluginBase):
 
     @classmethod
     def _fallback_candidate(cls, value: Any) -> Optional[Dict[str, Any]]:
-        file_path = cls._tmdb_file_path(value)
-        return {"file_path": file_path} if file_path else None
+        text = str(value or "").strip()
+        return {"url": text} if cls._origin_image(text) else None
 
-    def _selected_tmdb_images(
+    def _selected_images(
         self,
         metadata: Dict[str, Any],
         media_chain: Any = None,
     ) -> list:
         tmdb_id = metadata.get("tmdb_id")
-        if not tmdb_id:
-            return []
-        try:
-            from app.chain.media import MediaChain
-            chain = media_chain or MediaChain()
-            module = chain.modulemanager.get_running_module("TheMovieDbModule")
-            tmdb = getattr(module, "tmdb", None)
-            if not tmdb:
-                raise RuntimeError("MoviePilot TMDB 模块未启用")
-            media_type = self._media_type(metadata.get("media_type"))
-            include_languages = self._image_languages(metadata.get("original_language"))
-            if media_type == "电影":
-                root_images = tmdb.movie.images(movie_id=int(tmdb_id), include_image_language=include_languages) or {}
-            else:
-                root_images = tmdb.tv.images(tv_id=int(tmdb_id), include_image_language=include_languages) or {}
-        except Exception as err:
-            logger.warning(f"[TelegraphVideo] 获取 TMDB 主图片候选失败: tmdb_id={tmdb_id}, error={err}")
-            root_images = {}
-            tmdb = None
-            include_languages = self._image_languages(metadata.get("original_language"))
+        root_images = {}
+        tmdb = None
+        include_languages = self._image_languages(metadata.get("original_language"))
+        if tmdb_id:
+            try:
+                from app.chain.media import MediaChain
+                chain = media_chain or MediaChain()
+                module = chain.modulemanager.get_running_module("TheMovieDbModule")
+                tmdb = getattr(module, "tmdb", None)
+                if not tmdb:
+                    raise RuntimeError("MoviePilot TMDB 模块未启用")
+                media_type = self._media_type(metadata.get("media_type"))
+                if media_type == "电影":
+                    root_images = tmdb.movie.images(movie_id=int(tmdb_id), include_image_language=include_languages) or {}
+                else:
+                    root_images = tmdb.tv.images(tv_id=int(tmdb_id), include_image_language=include_languages) or {}
+            except Exception as err:
+                logger.warning(f"[TelegraphVideo] 获取 TMDB 主图片候选失败: tmdb_id={tmdb_id}, error={err}")
+                root_images = {}
+                tmdb = None
 
         images = []
         root_specs = [
             ("POSTER", "posters", metadata.get("poster_url") or metadata.get("poster")),
             ("BACKDROP", "backdrops", metadata.get("backdrop_url") or metadata.get("backdrop")),
             ("LOGO", "logos", metadata.get("logo_url") or metadata.get("logo")),
+            ("THUMB", None, metadata.get("thumb_url") or metadata.get("landscape_url")),
+            ("ART", None, metadata.get("art_url") or metadata.get("clearart_url")),
+            ("BANNER", None, metadata.get("banner_url")),
         ]
         for image_type, key, fallback in root_specs:
-            candidate = self._pick_tmdb_image(root_images.get(key)) or self._fallback_candidate(fallback)
+            candidate = (self._pick_tmdb_image(root_images.get(key)) if key else None) or self._fallback_candidate(fallback)
             payload = self._image_payload("item", image_type, candidate)
             if payload:
                 images.append(payload)
@@ -447,8 +481,11 @@ class TelegraphVideo(_PluginBase):
             "season_number": media_info.get("season") or media_info.get("season_number") or meta_info.get("begin_season"),
             "episode_number": media_info.get("episode_number") or meta_info.get("begin_episode"),
             "poster_url": media_info.get("poster_path") or media_info.get("poster_url") or media_info.get("poster"),
-            "backdrop_url": media_info.get("backdrop_path") or media_info.get("backdrop_url") or media_info.get("backdrop"),
-            "logo_url": media_info.get("logo_path") or media_info.get("logo_url") or media_info.get("logo"),
+            "backdrop_url": media_info.get("backdrop_path") or media_info.get("fanart_path") or media_info.get("backdrop_url") or media_info.get("backdrop"),
+            "logo_url": media_info.get("clearlogo_path") or media_info.get("logo_path") or media_info.get("logo_url") or media_info.get("logo"),
+            "thumb_url": media_info.get("thumb_path") or media_info.get("landscape_path") or media_info.get("thumb_url") or media_info.get("landscape"),
+            "art_url": media_info.get("clearart_path") or media_info.get("art_path") or media_info.get("art_url") or media_info.get("clearart"),
+            "banner_url": media_info.get("banner_path") or media_info.get("banner_url") or media_info.get("banner"),
             "trailer_url": media_info.get("trailer_url") or media_info.get("trailer"),
             "overview": media_info.get("overview") or media_info.get("plot"),
             "premiere_date": media_info.get("premiere_date") or media_info.get("release_date") or media_info.get("air_date"),
@@ -473,8 +510,17 @@ class TelegraphVideo(_PluginBase):
         media_chain = MediaChain()
         context = media_chain.recognize_by_path(str(strm_path), obtain_images=True)
         payload = self._context_to_payload(context)
-        payload["images"] = self._selected_tmdb_images(payload.get("metadata") or {}, media_chain)
+        payload["images"] = self._selected_images(payload.get("metadata") or {}, media_chain)
         return payload
+
+    def _recognize_images_best_effort(self, strm_path: Path) -> list:
+        try:
+            return self._recognize_strm(strm_path).get("images") or []
+        except Exception as err:
+            logger.warning(
+                f"[TelegraphVideo] 整理完成后补取标准图片失败，不影响媒体入库: path={strm_path}, error={err}"
+            )
+            return []
 
     @staticmethod
     def _dump_model(value: Any) -> Any:
@@ -799,7 +845,11 @@ class TelegraphVideo(_PluginBase):
             )
             history = self._latest_transfer_history(str(work_strm_path), source_storage)
             history_payload = self._history_to_payload(history)
-            history_payload["images"] = self._selected_tmdb_images(history_payload.get("metadata") or {})
+            history_payload["images"] = self._selected_images(history_payload.get("metadata") or {})
+            if state:
+                standardized_images = self._recognize_images_best_effort(work_strm_path)
+                if standardized_images:
+                    history_payload["images"] = standardized_images
             response_payload = {
                 "success": bool(state),
                 "message": "整理完成" if state else result,
