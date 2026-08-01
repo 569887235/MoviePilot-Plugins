@@ -4,6 +4,7 @@ import logging
 import re
 import secrets
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, Optional
@@ -24,10 +25,13 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.27"
+    plugin_version = "0.1.28"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
+    _series_catalog_cache: Dict[str, Dict[str, Any]] = {}
+    _series_catalog_cache_lock = threading.Lock()
+    _series_catalog_cache_ttl_seconds = 21600
 
     def init_plugin(self, config: dict = None):
         self._config = config or {}
@@ -534,6 +538,106 @@ class TelegraphVideo(_PluginBase):
         return list(selected.values())
 
 
+    @staticmethod
+    def _tmdb_image_url(value: Any) -> Optional[str]:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        if text.startswith(("http://", "https://")):
+            return text
+        return f"https://image.tmdb.org/t/p/original/{text.lstrip('/')}"
+
+    @staticmethod
+    def _runtime_seconds(value: Any) -> Optional[int]:
+        if value in (None, ""):
+            return None
+        try:
+            return round(float(value) * 60)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _tmdb_client(media_chain: Any) -> Any:
+        module = media_chain.modulemanager.get_running_module("TheMovieDbModule")
+        tmdb = getattr(module, "tmdb", None)
+        if not tmdb:
+            raise RuntimeError("MoviePilot TMDB 模块未启用")
+        return tmdb
+
+    def _series_catalog(self, metadata: Dict[str, Any], media_chain: Any) -> Dict[str, Any]:
+        tmdb_id = metadata.get("tmdb_id")
+        if not tmdb_id:
+            raise RuntimeError("电视剧缺少 TMDB ID，无法同步完整季集目录")
+        cache_key = str(tmdb_id)
+        now = time.monotonic()
+        with self._series_catalog_cache_lock:
+            cached = self._series_catalog_cache.get(cache_key)
+            if cached and now - cached["cached_at"] < self._series_catalog_cache_ttl_seconds:
+                return cached["catalog"]
+
+        tmdb = self._tmdb_client(media_chain)
+        series = self._jsonable(tmdb.tv.details(tv_id=int(tmdb_id)))
+        if not isinstance(series, dict) or not isinstance(series.get("seasons"), list):
+            raise RuntimeError(f"TMDB 未返回有效电视剧目录: tmdb_id={tmdb_id}")
+
+        seasons = []
+        for summary_value in series["seasons"]:
+            summary = self._jsonable(summary_value)
+            if not isinstance(summary, dict) or summary.get("season_number") is None:
+                continue
+            season_number = int(summary["season_number"])
+            detail = self._jsonable(
+                tmdb.season_obj.details(tv_id=int(tmdb_id), season_num=season_number)
+            )
+            if not isinstance(detail, dict) or not isinstance(detail.get("episodes"), list):
+                raise RuntimeError(
+                    f"TMDB 未返回有效季目录: tmdb_id={tmdb_id}, season={season_number}"
+                )
+            episodes = []
+            for episode_value in detail["episodes"]:
+                episode = self._jsonable(episode_value)
+                if not isinstance(episode, dict) or episode.get("episode_number") is None:
+                    continue
+                episodes.append({
+                    "episode_number": int(episode["episode_number"]),
+                    "name": episode.get("name"),
+                    "overview": episode.get("overview"),
+                    "air_date": episode.get("air_date"),
+                    "runtime_seconds": self._runtime_seconds(episode.get("runtime")),
+                    "still_url": self._tmdb_image_url(episode.get("still_path")),
+                })
+            seasons.append({
+                "season_number": season_number,
+                "name": detail.get("name") or summary.get("name"),
+                "overview": detail.get("overview") or summary.get("overview"),
+                "air_date": detail.get("air_date") or summary.get("air_date"),
+                "episode_count": len(episodes),
+                "poster_url": self._tmdb_image_url(detail.get("poster_path") or summary.get("poster_path")),
+                "episodes": episodes,
+            })
+
+        catalog = {"complete": True, "source": "TMDB", "seasons": seasons}
+        with self._series_catalog_cache_lock:
+            self._series_catalog_cache[cache_key] = {"cached_at": now, "catalog": catalog}
+        return catalog
+
+    def _attach_series_catalog(
+        self,
+        payload: Dict[str, Any],
+        metadata: Dict[str, Any],
+        media_chain: Any,
+    ) -> None:
+        if self._media_type(metadata.get("media_type")) != "电视剧":
+            return
+        try:
+            payload["library_catalog"] = self._series_catalog(metadata, media_chain)
+            payload.pop("library_catalog_error", None)
+        except Exception as err:
+            payload["library_catalog_error"] = str(err)
+            logger.warning(
+                f"[TelegraphVideo] 同步电视剧完整目录失败: tmdb_id={metadata.get('tmdb_id')}, error={err}"
+            )
+
     def _selected_images(
         self,
         metadata: Dict[str, Any],
@@ -695,6 +799,7 @@ class TelegraphVideo(_PluginBase):
             **(payload.get("metadata") or {}),
             **scraped_metadata,
         }
+        self._attach_series_catalog(payload, selection_metadata, media_chain)
         selected_images = self._selected_images(selection_metadata, media_chain)
         scraped_file_images = self._scraped_file_images(
             scraped_images,
@@ -717,14 +822,14 @@ class TelegraphVideo(_PluginBase):
             )
         return payload
 
-    def _recognize_images_best_effort(self, strm_path: Path) -> list:
+    def _recognize_payload_best_effort(self, strm_path: Path) -> Dict[str, Any]:
         try:
-            return self._recognize_strm(strm_path).get("images") or []
+            return self._recognize_strm(strm_path)
         except Exception as err:
             logger.warning(
                 f"[TelegraphVideo] 整理完成后补取标准图片失败，不影响媒体入库: path={strm_path}, error={err}"
             )
-            return []
+            return {}
 
     @staticmethod
     def _dump_model(value: Any) -> Any:
@@ -1051,9 +1156,13 @@ class TelegraphVideo(_PluginBase):
             history_payload = self._history_to_payload(history)
             history_payload["images"] = self._selected_images(history_payload.get("metadata") or {})
             if state:
-                standardized_images = self._recognize_images_best_effort(work_strm_path)
-                if standardized_images:
-                    history_payload["images"] = standardized_images
+                recognized_payload = self._recognize_payload_best_effort(work_strm_path)
+                if recognized_payload.get("images"):
+                    history_payload["images"] = recognized_payload["images"]
+                if recognized_payload.get("library_catalog"):
+                    history_payload["library_catalog"] = recognized_payload["library_catalog"]
+                if recognized_payload.get("library_catalog_error"):
+                    history_payload["library_catalog_error"] = recognized_payload["library_catalog_error"]
             response_payload = {
                 "success": bool(state),
                 "message": "整理完成" if state else result,
