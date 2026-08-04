@@ -18,6 +18,7 @@ except Exception:  # pragma: no cover - fallback for local syntax checks
     logger = logging.getLogger(__name__)
 
 from app.plugins import _PluginBase
+from .metadata import compact, normalize_media_context, provider_metadata, remove_catalog_aliases
 
 
 class TelegraphVideo(_PluginBase):
@@ -25,7 +26,7 @@ class TelegraphVideo(_PluginBase):
     plugin_name = "Telegraph Video"
     plugin_desc = "Telegraph Video MP 接入插件骨架，用于后续接管 STRM 与同步媒体资源。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.28"
+    plugin_version = "0.1.29"
     plugin_author = "telegraph-video"
     plugin_order = 1
     auth_level = 1
@@ -605,6 +606,9 @@ class TelegraphVideo(_PluginBase):
                     "air_date": episode.get("air_date"),
                     "runtime_seconds": self._runtime_seconds(episode.get("runtime")),
                     "still_url": self._tmdb_image_url(episode.get("still_path")),
+                    "provider_metadata": provider_metadata(episode, {
+                        "episode_number", "name", "original_name", "overview", "air_date", "runtime", "still_path"
+                    }),
                 })
             seasons.append({
                 "season_number": season_number,
@@ -613,6 +617,9 @@ class TelegraphVideo(_PluginBase):
                 "air_date": detail.get("air_date") or summary.get("air_date"),
                 "episode_count": len(episodes),
                 "poster_url": self._tmdb_image_url(detail.get("poster_path") or summary.get("poster_path")),
+                "provider_metadata": provider_metadata({**summary, **detail}, {
+                    "season_number", "name", "original_name", "overview", "air_date", "episode_count", "poster_path", "episodes"
+                }),
                 "episodes": episodes,
             })
 
@@ -631,6 +638,7 @@ class TelegraphVideo(_PluginBase):
             return
         try:
             payload["library_catalog"] = self._series_catalog(metadata, media_chain)
+            payload["media_info"] = remove_catalog_aliases(payload.get("media_info") or {})
             payload.pop("library_catalog_error", None)
         except Exception as err:
             payload["library_catalog_error"] = str(err)
@@ -726,59 +734,7 @@ class TelegraphVideo(_PluginBase):
         if not context:
             return {}
         context_dict = TelegraphVideo._jsonable(context.to_dict() if hasattr(context, "to_dict") else context)
-        media_info = context_dict.get("media_info") or {}
-        meta_info = context_dict.get("meta_info") or {}
-        media_type = media_info.get("type")
-        if hasattr(media_type, "value"):
-            media_type = media_type.value
-        provider_ids = media_info.get("provider_ids") or media_info.get("providerIds") or {}
-        runtime_seconds = media_info.get("runtime_seconds") or media_info.get("runtimeSeconds")
-        runtime_minutes = media_info.get("runtime") or media_info.get("runtime_minutes")
-        if not runtime_seconds and runtime_minutes:
-            try:
-                runtime_seconds = int(float(runtime_minutes) * 60)
-            except (TypeError, ValueError):
-                runtime_seconds = None
-        metadata = {
-            "title": media_info.get("title") or meta_info.get("title") or meta_info.get("name"),
-            "original_title": media_info.get("original_title") or media_info.get("en_title"),
-            "year": media_info.get("year") or meta_info.get("year"),
-            "media_type": TelegraphVideo._media_type(media_type or meta_info.get("type")),
-            "tmdb_id": media_info.get("tmdb_id") or provider_ids.get("tmdb") or meta_info.get("tmdbid"),
-            "imdb_id": media_info.get("imdb_id") or provider_ids.get("imdb"),
-            "douban_id": media_info.get("douban_id") or provider_ids.get("douban") or meta_info.get("doubanid"),
-            "tvdb_id": media_info.get("tvdb_id") or provider_ids.get("tvdb"),
-            "original_language": media_info.get("original_language"),
-            "season_number": media_info.get("season") or media_info.get("season_number") or meta_info.get("begin_season"),
-            "episode_number": media_info.get("episode_number") or meta_info.get("begin_episode"),
-            "poster_url": media_info.get("poster_path") or media_info.get("poster_url") or media_info.get("poster"),
-            "backdrop_url": media_info.get("backdrop_path") or media_info.get("backdrop_url") or media_info.get("backdrop"),
-            "fanart_url": media_info.get("fanart_path") or media_info.get("fanart_url") or media_info.get("fanart"),
-            "logo_url": media_info.get("logo_path") or media_info.get("logo_url") or media_info.get("logo"),
-            "clearlogo_url": media_info.get("clearlogo_path") or media_info.get("clearlogo_url") or media_info.get("clearlogo"),
-            "thumb_url": media_info.get("thumb_path") or media_info.get("thumb_url") or media_info.get("thumb"),
-            "landscape_url": media_info.get("landscape_path") or media_info.get("landscape_url") or media_info.get("landscape"),
-            "art_url": media_info.get("art_path") or media_info.get("art_url") or media_info.get("art"),
-            "clearart_url": media_info.get("clearart_path") or media_info.get("clearart_url") or media_info.get("clearart"),
-            "banner_url": media_info.get("banner_path") or media_info.get("banner_url") or media_info.get("banner"),
-            "trailer_url": media_info.get("trailer_url") or media_info.get("trailer"),
-            "overview": media_info.get("overview") or media_info.get("plot"),
-            "premiere_date": media_info.get("premiere_date") or media_info.get("release_date") or media_info.get("air_date"),
-            "official_rating": media_info.get("official_rating") or media_info.get("content_rating"),
-            "community_rating": media_info.get("community_rating") or media_info.get("vote_average") or media_info.get("rating"),
-            "critic_rating": media_info.get("critic_rating"),
-            "runtime_seconds": runtime_seconds,
-            "genres": media_info.get("genres") or media_info.get("genre"),
-            "tags": media_info.get("tags"),
-            "studios": media_info.get("studios") or media_info.get("production_companies"),
-            "people": media_info.get("people") or media_info.get("actors") or media_info.get("credits"),
-            "episode_title": media_info.get("episode_title"),
-            "episode_overview": media_info.get("episode_overview"),
-            "episode_premiere_date": media_info.get("episode_premiere_date") or media_info.get("episode_air_date"),
-        }
-        metadata = {k: v for k, v in metadata.items() if v not in (None, "")}
-        recognized = bool(media_info and media_info.get("title"))
-        return {"recognized": recognized, "metadata": metadata, "media": metadata, "recognize_result": context_dict}
+        return normalize_media_context(context_dict)
 
     def _recognize_strm(self, strm_path: Path) -> Dict[str, Any]:
         from app.chain.media import MediaChain
@@ -796,7 +752,7 @@ class TelegraphVideo(_PluginBase):
                 )
         scraped_metadata = self._metadata_from_scraped_images(scraped_images)
         selection_metadata = {
-            **(payload.get("metadata") or {}),
+            **(payload.get("media_info") or {}),
             **scraped_metadata,
         }
         self._attach_series_catalog(payload, selection_metadata, media_chain)
@@ -879,7 +835,7 @@ class TelegraphVideo(_PluginBase):
         media_type = self._media_type(getattr(history, "type", None))
         season_number = self._first_episode(getattr(history, "seasons", None))
         episode_number = self._first_episode(getattr(history, "episodes", None))
-        metadata = {
+        media_info = {
             "title": getattr(history, "title", None),
             "year": getattr(history, "year", None),
             "media_type": media_type,
@@ -888,30 +844,25 @@ class TelegraphVideo(_PluginBase):
             "douban_id": getattr(history, "doubanid", None),
             "season_number": season_number,
             "episode_number": episode_number,
-            "poster": getattr(history, "image", None),
+            "poster_url": getattr(history, "image", None),
         }
-        metadata = {k: v for k, v in metadata.items() if v not in (None, "")}
+        media_info = compact(media_info)
         dest = getattr(history, "dest", None)
         dest_storage = getattr(history, "dest_storage", None)
         return {
-            "metadata": metadata,
-            "media": metadata,
+            "schema_version": 2,
+            "media_info": media_info,
             "mp_category_path": self._category_path(dest),
             "mp_target_storage": dest_storage,
-            "transfer_history": {
+            "transfer_history": compact({
                 "id": getattr(history, "id", None),
-                "src": getattr(history, "src", None),
-                "src_storage": getattr(history, "src_storage", None),
                 "dest": dest,
                 "dest_storage": dest_storage,
                 "mode": getattr(history, "mode", None),
                 "status": getattr(history, "status", None),
                 "errmsg": getattr(history, "errmsg", None),
                 "files": getattr(history, "files", None),
-                "src_fileitem": self._jsonable(getattr(history, "src_fileitem", None)),
-                "dest_fileitem": self._jsonable(getattr(history, "dest_fileitem", None)),
-                "raw": self._jsonable(history),
-            }
+            })
         }
 
     def _get_transfer_history_by_src(self, oper: Any, source_path: str, source_storage: str) -> Any:
@@ -1154,9 +1105,16 @@ class TelegraphVideo(_PluginBase):
             )
             history = self._latest_transfer_history(str(work_strm_path), source_storage)
             history_payload = self._history_to_payload(history)
-            history_payload["images"] = self._selected_images(history_payload.get("metadata") or {})
+            history_payload["images"] = self._selected_images(history_payload.get("media_info") or {})
             if state:
                 recognized_payload = self._recognize_payload_best_effort(work_strm_path)
+                if recognized_payload.get("media_info"):
+                    history_payload["media_info"] = {
+                        **(history_payload.get("media_info") or {}),
+                        **recognized_payload["media_info"],
+                    }
+                if recognized_payload.get("recognition_info"):
+                    history_payload["recognition_info"] = recognized_payload["recognition_info"]
                 if recognized_payload.get("images"):
                     history_payload["images"] = recognized_payload["images"]
                 if recognized_payload.get("library_catalog"):
