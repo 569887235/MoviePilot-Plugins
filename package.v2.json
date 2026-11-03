@@ -44,12 +44,13 @@
     "name": "余人美",
     "description": "余人美两阶段识别与人工确认入库，同集同分辨率复用稳定 STRM。",
     "labels": "媒体库,STRM,余人美",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png",
     "author": "569887235",
     "level": 1,
     "history": {
-      "v0.1.0": "新增独立余人美插件，识别返回后人工确认入库，按标准分辨率复用稳定 STRM"
+      "v0.1.0": "新增独立余人美插件，识别返回后人工确认入库，按标准分辨率复用稳定 STRM",
+      "v0.1.1": "沿用 MoviePilot 已配置的媒体库目录与分类规则，无需单独填写容器入库目录"
     }
   }
 }

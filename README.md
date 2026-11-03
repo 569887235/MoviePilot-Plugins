@@ -5,7 +5,7 @@ MoviePilot V2 插件仓库，现包含独立的 `TelegraphVideo` 与 `Yurenmei` 
 ## 余人美 / Yurenmei
 
 - 目录：`plugins.v2/yurenmei`；市场插件名：**余人美**，默认关闭。
-- 在 MoviePilot 添加本仓库后安装“余人美”，填写容器内的 STRM 绝对入库目录并启用。整理目标为 `<入库目录>/<标准分辨率>/…`，供 Emby 扫描；使用 MoviePilot 原生识别、整理和可选刮削。
+- 在 MoviePilot 添加本仓库后安装并启用“余人美”。入库沿用 MoviePilot 的目录选择与分类配置，无需另外填写容器目录；整理目标为 `<匹配的本地媒体库目录>/<标准分辨率>/…`，供 Emby 扫描，使用原生整理和可选刮削。媒体库目录需在 MoviePilot 中配置为本地存储。
 - 先调用 `POST /api/v1/plugin/Yurenmei/recognize`，传入 `request_id`、`name`。这是纯识别，不创建 STRM 或调用整理。
 - 使用 `GET /api/v1/plugin/Yurenmei/jobs/{request_id}` 获取识别结果；业务后台人工核对片名、年份、TMDB 与季集后，再调用 `POST /api/v1/plugin/Yurenmei/import`。
 - 入库参数：新的 `request_id`、第一阶段 `recognition_id`、`confirmed: true`、`season`、`episode`、`resolution`、`play_url`。电影的季集为0；电视剧须人工确认季集。`play_url` 必须是业务提供的 `/play/yrm/<64位随机键>/stream` 稳定地址。

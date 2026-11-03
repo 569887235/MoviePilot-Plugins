@@ -20,6 +20,8 @@ class YurenmeiTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.temp.name)
         self.transfers, self.recognitions, self.histories = [], [], {}
+        self.directory = types.SimpleNamespace(library_path=str(self.root / "library"), library_storage="local", library_category_folder=True)
+        self.directory_calls = []
         owner = self
 
         class Base:
@@ -27,20 +29,28 @@ class YurenmeiTest(unittest.TestCase):
                 return owner.root / "plugin"
 
         class MediaChain:
+            def recognize_media(self, tmdbid, mtype):
+                return types.SimpleNamespace(tmdb_id=tmdbid, type=mtype, category="国产剧")
+
             def recognize_by_path(self, path, **options):
                 owner.recognitions.append((path, options))
                 return {"media_info": {"type": MediaType.TV, "tmdb_id": 123, "title": "测试剧", "year": "2026"},
                         "meta_info": {"begin_season": 1, "begin_episode": 2}}
 
         class TransferChain:
-            def manual_transfer(self, **options):
+            def do_transfer(self, **options):
                 owner.transfers.append(options)
                 source = pathlib.Path(options["fileitem"].path)
-                target = options["target_path"] / source.name
+                target = pathlib.Path(options["target_directory"].library_path) / source.name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, target)
                 owner.histories[str(source)] = types.SimpleNamespace(id=len(owner.transfers), status=True, dest=str(target))
                 return True, ""
+
+        class DirectoryHelper:
+            def get_dir(self, **options):
+                owner.directory_calls.append(options)
+                return owner.directory
 
         class TransferHistoryOper:
             def get_by_src(self, path, storage):
@@ -49,10 +59,12 @@ class YurenmeiTest(unittest.TestCase):
         modules = {name: types.ModuleType(name) for name in [
             "app", "app.plugins", "app.chain", "app.chain.media", "app.chain.transfer",
             "app.db", "app.db.transferhistory_oper", "app.schemas", "app.schemas.types",
+            "app.helper", "app.helper.directory",
         ]}
         modules["app.plugins"]._PluginBase = Base
         modules["app.chain.media"].MediaChain = MediaChain
         modules["app.chain.transfer"].TransferChain = TransferChain
+        modules["app.helper.directory"].DirectoryHelper = DirectoryHelper
         modules["app.db.transferhistory_oper"].TransferHistoryOper = TransferHistoryOper
         modules["app.schemas"].FileItem = lambda **values: types.SimpleNamespace(**values)
         modules["app.schemas.types"].MediaType = MediaType
@@ -63,7 +75,7 @@ class YurenmeiTest(unittest.TestCase):
         self.module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.module)
         self.plugin = self.module.Yurenmei()
-        self.plugin.init_plugin({"enabled": True, "target_path": str(self.root / "library")})
+        self.plugin.init_plugin({"enabled": True})
 
     def tearDown(self):
         self.plugin._executor.shutdown(wait=True)
@@ -112,8 +124,9 @@ class YurenmeiTest(unittest.TestCase):
         self.assertNotEqual(a["result"]["strm_path"], b["result"]["strm_path"])
         for call in self.transfers:
             self.assertFalse(call["force"])
-            self.assertEqual(call["tmdbid"], 123)
-            self.assertEqual(call["mtype"], MediaType.TV)
+            self.assertEqual(call["mediainfo"].tmdb_id, 123)
+            self.assertEqual(call["mediainfo"].type, MediaType.TV)
+            self.assertTrue(call["manual"])
             self.assertEqual(call["season"], 1)
         self.assertIn("/720p/", a["result"]["strm_path"])
         self.assertIn("/1080p/", b["result"]["strm_path"])
@@ -131,7 +144,7 @@ class YurenmeiTest(unittest.TestCase):
 
     def test_failed_transfer_is_not_reported_as_success_and_retry_keeps_identity(self):
         self.recognize()
-        with patch.object(sys.modules["app.chain.transfer"].TransferChain, "manual_transfer", return_value=(False, "native failure")):
+        with patch.object(sys.modules["app.chain.transfer"].TransferChain, "do_transfer", return_value=(False, "native failure")):
             failed = self.run_job(self.plugin.import_strm, self.payload())
         self.assertEqual(failed["status"], "failed")
         self.assertIn("native failure", failed["error"])
@@ -167,6 +180,26 @@ class YurenmeiTest(unittest.TestCase):
                         {**self.payload("raw"), "play_url": "https://media.test/temporary.m3u8"},
                         {**self.payload("bad-episode"), "episode": 0}]:
             self.assertEqual(self.run_job(self.plugin.import_strm, payload)["status"], "failed")
+        self.assertEqual(self.transfers, [])
+
+    def test_import_uses_moviepilot_directory_without_changing_its_configuration(self):
+        self.directory.library_path = str(self.root / "configured-tv-library")
+        self.recognize()
+        job = self.run_job(self.plugin.import_strm, self.payload())
+        self.assertEqual(job["status"], "success")
+        self.assertTrue(job["result"]["strm_path"].startswith(str(self.root / "configured-tv-library/720p")))
+        self.assertEqual(self.directory.library_path, str(self.root / "configured-tv-library"))
+        self.assertTrue(self.transfers[0]["target_directory"].library_category_folder)
+        self.assertEqual(self.directory_calls[0]["media"].category, "国产剧")
+        self.assertNotIn("target_path", self.plugin.get_form()[1])
+
+    def test_missing_or_unsupported_moviepilot_directory_does_not_transfer(self):
+        self.recognize()
+        for directory in [None, types.SimpleNamespace(library_path="", library_storage="local"),
+                          types.SimpleNamespace(library_path="/library", library_storage="remote")]:
+            self.directory = directory
+            job = self.run_job(self.plugin.import_strm, self.payload())
+            self.assertEqual(job["status"], "failed")
         self.assertEqual(self.transfers, [])
 
     def test_market_metadata_and_standalone_entry_are_aligned(self):

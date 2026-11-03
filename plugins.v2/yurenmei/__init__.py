@@ -5,6 +5,7 @@ import json
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from enum import Enum
 from pathlib import Path
 from urllib.parse import urlparse
@@ -16,7 +17,7 @@ class Yurenmei(_PluginBase):
     plugin_name = "余人美"
     plugin_desc = "余人美两阶段识别与人工确认入库，同集同分辨率复用稳定 STRM。"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png"
-    plugin_version = "0.1.0"
+    plugin_version = "0.1.1"
     plugin_author = "569887235"
     plugin_config_prefix = "yurenmei_"
     plugin_order = 2
@@ -165,8 +166,10 @@ class Yurenmei(_PluginBase):
                           "episode": meta.get("begin_episode")}, "context": context}
 
     def _import(self, payload):
+        from app.chain.media import MediaChain
         from app.chain.transfer import TransferChain
         from app.db.transferhistory_oper import TransferHistoryOper
+        from app.helper.directory import DirectoryHelper
         from app.schemas import FileItem
         from app.schemas.types import MediaType
 
@@ -189,9 +192,6 @@ class Yurenmei(_PluginBase):
         url = urlparse(play_url)
         if url.scheme not in {"http", "https"} or not url.hostname or url.username or url.password or url.query or url.fragment or not re.fullmatch(r"/play/yrm/[a-f0-9]{64}/stream", url.path):
             raise ValueError("必须提供余人美稳定播放地址")
-        target = self._config.get("target_path") or ""
-        if not target or not Path(target).is_absolute():
-            raise ValueError("请先在插件配置填写 MoviePilot 可访问的绝对入库目录")
         identity = f'{media["mediaType"]}:{media["tmdbId"]}:{season}:{episode}:{resolution}'
         key = hashlib.sha256(identity.encode()).hexdigest()
         directory = self.get_data_path() / "strm" / key
@@ -221,13 +221,25 @@ class Yurenmei(_PluginBase):
             oper = TransferHistoryOper()
             history = oper.get_by_src(str(path), "local")
             if not history or not getattr(history, "status", False):
-                state, message = TransferChain().manual_transfer(
+                media_type = MediaType.MOVIE if media["mediaType"] == "movie" else MediaType.TV
+                media_info = MediaChain().recognize_media(tmdbid=media["tmdbId"], mtype=media_type)
+                if not media_info or media_info.tmdb_id != media["tmdbId"] or media_info.type != media_type:
+                    raise ValueError("MoviePilot 媒体信息与已确认的 TMDB 或类型不一致")
+                target = deepcopy(DirectoryHelper().get_dir(media=media_info, storage="local", src_path=path))
+                if not target or not target.library_path:
+                    raise ValueError("未匹配 MoviePilot 媒体库目录，请核对 MoviePilot 的目录与分类配置")
+                if target.library_storage != "local" or not Path(target.library_path).is_absolute():
+                    raise ValueError("当前 STRM 入库需要 MoviePilot 配置本地存储的绝对媒体库目录")
+                # Keep MoviePilot's directory selection and category settings.
+                # Isolate resolutions beneath its selected library root so a
+                # rename template without quality cannot overwrite another STRM.
+                target.library_path = str(Path(target.library_path) / resolution)
+                state, message = TransferChain().do_transfer(
                     fileitem=FileItem(storage="local", path=str(path), type="file", name=filename, size=path.stat().st_size),
-                    target_storage="local", target_path=Path(target) / resolution,
-                    tmdbid=media["tmdbId"], mtype=MediaType.MOVIE if media["mediaType"] == "movie" else MediaType.TV,
+                    mediainfo=media_info, target_directory=target, target_storage=target.library_storage,
                     season=season if media["mediaType"] == "tv" else None,
                     transfer_type="copy", min_filesize=0, scrape=self._config.get("scrape", True) is True,
-                    force=False, background=False,
+                    force=False, background=False, manual=True,
                 )
                 if not state:
                     raise ValueError(str(message or "MoviePilot 整理失败"))
@@ -247,10 +259,10 @@ class Yurenmei(_PluginBase):
     def get_form(self) -> tuple[list, dict]:
         return [{"component": "VForm", "content": [
             {"component": "VSwitch", "props": {"model": "enabled", "label": "启用余人美插件"}},
-            {"component": "VTextField", "props": {"model": "target_path", "label": "STRM 入库目录",
-             "hint": "填写 MoviePilot 容器内的绝对路径。按分辨率分目录整理，供 Emby 扫描。", "persistent-hint": True}},
+            {"component": "VAlert", "props": {"type": "info", "variant": "tonal", "text":
+             "入库沿用 MoviePilot 的目录与分类配置，在匹配的本地媒体库目录下按分辨率整理，无需另填容器目录。"}},
             {"component": "VSwitch", "props": {"model": "scrape", "label": "刮削元数据"}},
-        ]}], {"enabled": self.get_state(), "target_path": self._config.get("target_path", ""),
+        ]}], {"enabled": self.get_state(),
               "scrape": self._config.get("scrape", True)}
 
     @staticmethod
