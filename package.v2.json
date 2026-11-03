@@ -39,5 +39,17 @@
       "v0.1.28": "电视剧识别回调同步完整 TMDB 季集目录，支持影视库覆盖统计和缺集下钻",
       "v0.1.29": "识别回调改为完整且去重的 v2 元数据协议，并按真实职位规范化演职人员"
     }
+  },
+  "Yurenmei": {
+    "name": "余人美",
+    "description": "余人美两阶段识别与人工确认入库，同集同分辨率复用稳定 STRM。",
+    "labels": "媒体库,STRM,余人美",
+    "version": "0.1.0",
+    "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/Moviepilot_A.png",
+    "author": "569887235",
+    "level": 1,
+    "history": {
+      "v0.1.0": "新增独立余人美插件，识别返回后人工确认入库，按标准分辨率复用稳定 STRM"
+    }
   }
 }
